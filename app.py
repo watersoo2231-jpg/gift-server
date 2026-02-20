@@ -417,6 +417,7 @@ def oauth_callback():
             if refresh_token:
                 _refresh_token_store["token"] = refresh_token
                 save_refresh_token_to_railway(refresh_token)
+                logger.info(f"[REFRESH_TOKEN_VALUE] {refresh_token}")
             logger.info("OAuth 인증 완료 - 액세스 토큰 및 리프레시 토큰 저장")
             return """<html><head><meta charset='UTF-8'></head><body>
             <h2 style='color:green'>✅ OAuth 인증 완료!</h2>

@@ -335,6 +335,30 @@ def health():
     return jsonify({"status": "ok", "time": datetime.now().isoformat(), "oauth_ready": has_token})
 
 
+@app.route("/admin/save_token", methods=["GET"])
+def admin_save_token():
+    """현재 메모리의 리프레시 토큰을 Railway 환경변수에 강제 저장"""
+    token = _refresh_token_store.get("token", "")
+    if not token:
+        return jsonify({"error": "리프레시 토큰 없음 - OAuth 인증 먼저 필요"}), 400
+    # Railway CLI 방식으로 환경변수 저장
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["railway", "variables", "set", f"CAFE24_REFRESH_TOKEN={token}"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "RAILWAY_NO_TELEMETRY": "1"}
+        )
+        if result.returncode == 0:
+            logger.info("Railway CLI로 리프레시 토큰 저장 완료")
+            return jsonify({"success": True, "message": "Railway 환경변수에 저장 완료"})
+        else:
+            logger.error(f"Railway CLI 저장 실패: {result.stderr}")
+            return jsonify({"success": False, "token_preview": token[:20] + "...", "error": result.stderr[:200]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "token_preview": token[:20] + "..."})
+
+
 @app.route("/oauth/install", methods=["GET"])
 def oauth_install():
     """카페24 OAuth 인증 시작 - 이 URL을 브라우저에서 열면 카페24 로그인 페이지로 이동"""

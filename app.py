@@ -4,12 +4,8 @@
 카페24 주문 완료 웹훅을 수신하여
 선물 받는 사람에게 카카오 알림톡으로 배송지 입력 링크를 자동 발송합니다.
 
-실행 방법:
-  pip install flask requests coolsms_python_sdk
-  python app.py
-
 배포 시:
-  gunicorn -w 2 -b 0.0.0.0:5000 app:app
+  gunicorn -w 2 -b 0.0.0.0:$PORT app:app
 """
 
 import os
@@ -18,46 +14,50 @@ import hmac
 import hashlib
 import secrets
 import logging
+import base64
+import time
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 import requests
 
 # ──────────────────────────────────────────────
-# 설정값 (환경변수 또는 직접 입력)
+# 설정값 (환경변수로 관리)
 # ──────────────────────────────────────────────
-CAFE24_MALL_ID      = os.getenv("CAFE24_MALL_ID",      "pathocrionwater")
-CAFE24_CLIENT_ID    = os.getenv("CAFE24_CLIENT_ID",    "NiqeMRujVKFU1zE5OWzUID")
-CAFE24_CLIENT_SECRET= os.getenv("CAFE24_CLIENT_SECRET","Yb3GU2KIKZltbQZrgojV1C")
-CAFE24_WEBHOOK_SECRET=os.getenv("CAFE24_WEBHOOK_SECRET","여기에_웹훅_시크릿키")
+CAFE24_MALL_ID       = os.getenv("CAFE24_MALL_ID",       "pathocrionwater")
+CAFE24_CLIENT_ID     = os.getenv("CAFE24_CLIENT_ID",     "NiqeMRujVKFU1zE5OWzUID")
+CAFE24_CLIENT_SECRET = os.getenv("CAFE24_CLIENT_SECRET", "Yb3GU2KIKZltbQZrgojV1C")
+CAFE24_WEBHOOK_SECRET= os.getenv("CAFE24_WEBHOOK_SECRET","")
 
-# 쿨SMS (알림톡 발송용) - https://coolsms.co.kr
-COOLSMS_API_KEY     = os.getenv("COOLSMS_API_KEY",     "여기에_쿨SMS_API_KEY")
-COOLSMS_API_SECRET  = os.getenv("COOLSMS_API_SECRET",  "여기에_쿨SMS_API_SECRET")
-COOLSMS_SENDER      = os.getenv("COOLSMS_SENDER",      "여기에_발신번호_010XXXXXXXX")
-KAKAO_CHANNEL_ID    = os.getenv("KAKAO_CHANNEL_ID",    "여기에_카카오_채널_ID_@채널명")
-KAKAO_TEMPLATE_ID   = os.getenv("KAKAO_TEMPLATE_ID",   "여기에_알림톡_템플릿_코드")
+# 쿨SMS HTTP API (SDK 없이 직접 호출)
+COOLSMS_API_KEY    = os.getenv("COOLSMS_API_KEY",    "")
+COOLSMS_API_SECRET = os.getenv("COOLSMS_API_SECRET", "")
+COOLSMS_SENDER     = os.getenv("COOLSMS_SENDER",     "")
+KAKAO_CHANNEL_ID   = os.getenv("KAKAO_CHANNEL_ID",   "")
+KAKAO_TEMPLATE_ID  = os.getenv("KAKAO_TEMPLATE_ID",  "")
 
-# 배송지 입력 페이지 URL
-GIFT_ADDRESS_URL    = os.getenv("GIFT_ADDRESS_URL",
-    f"https://{CAFE24_MALL_ID}.cafe24.com/web/upload/gift_address.html")
+# 배송지 입력 페이지 URL (서버 자체 제공)
+SERVER_URL         = os.getenv("SERVER_URL", "https://gift-server-production-3f51.up.railway.app")
+GIFT_ADDRESS_URL   = f"{SERVER_URL}/gift/address"
 
-# 선물 주문 만료일 (일 수)
-GIFT_EXPIRE_DAYS    = int(os.getenv("GIFT_EXPIRE_DAYS", "7"))
+GIFT_EXPIRE_DAYS   = int(os.getenv("GIFT_EXPIRE_DAYS", "7"))
 
 # ──────────────────────────────────────────────
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# 간단한 인메모리 토큰 저장소 (운영 시 DB/Redis로 교체 권장)
+# 인메모리 토큰 저장소 (운영 시 DB/Redis 권장)
 gift_tokens = {}
+
+# 카페24 액세스 토큰 캐시
+_token_cache = {"token": None, "expires_at": 0}
 
 
 # ──────────────────────────────────────────────
 # 유틸 함수
 # ──────────────────────────────────────────────
+
 def generate_token(order_id: str) -> str:
-    """고유 토큰 생성 및 저장"""
     token = secrets.token_urlsafe(32)
     expire = datetime.now() + timedelta(days=GIFT_EXPIRE_DAYS)
     gift_tokens[token] = {
@@ -68,12 +68,11 @@ def generate_token(order_id: str) -> str:
     return token
 
 
-def verify_cafe24_webhook(request) -> bool:
-    """카페24 웹훅 서명 검증"""
-    if not CAFE24_WEBHOOK_SECRET or CAFE24_WEBHOOK_SECRET.startswith("여기에"):
-        return True  # 시크릿 미설정 시 검증 생략 (개발 환경)
-    signature = request.headers.get("X-Cafe24-Signature", "")
-    body = request.get_data()
+def verify_cafe24_webhook(req) -> bool:
+    if not CAFE24_WEBHOOK_SECRET:
+        return True  # 시크릿 미설정 시 검증 생략
+    signature = req.headers.get("X-Cafe24-Signature", "")
+    body = req.get_data()
     expected = hmac.new(
         CAFE24_WEBHOOK_SECRET.encode(),
         body,
@@ -82,80 +81,88 @@ def verify_cafe24_webhook(request) -> bool:
     return hmac.compare_digest(signature, expected)
 
 
+def get_coolsms_auth_header() -> str:
+    """쿨SMS HMAC 인증 헤더 생성"""
+    date = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    salt = secrets.token_hex(16)
+    data = date + salt
+    signature = hmac.new(
+        COOLSMS_API_SECRET.encode(),
+        data.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return f'HMAC-SHA256 apiKey={COOLSMS_API_KEY}, date={date}, salt={salt}, signature={signature}'
+
+
 def send_alimtalk(receiver_phone: str, receiver_name: str,
                   sender_name: str, gift_message: str,
                   order_id: str, token: str, expire_date: str) -> bool:
-    """쿨SMS를 통한 카카오 알림톡 발송"""
+    """쿨SMS HTTP API로 카카오 알림톡 발송"""
+    if not COOLSMS_API_KEY or not COOLSMS_API_SECRET:
+        logger.warning("쿨SMS API 키 미설정 - 알림톡 발송 건너뜀")
+        return False
+
+    address_url = (
+        f"{GIFT_ADDRESS_URL}"
+        f"?token={token}"
+        f"&order_id={requests.utils.quote(order_id)}"
+        f"&from={requests.utils.quote(sender_name)}"
+        f"&msg={requests.utils.quote(gift_message or '')}"
+        f"&expire={requests.utils.quote(expire_date)}"
+    )
+
     try:
-        from coolsms_python_sdk import DefaultApi, ApiClient, Configuration, SendMessageRequest
-
-        address_url = (
-            f"{GIFT_ADDRESS_URL}"
-            f"?token={token}"
-            f"&order_id={order_id}"
-            f"&from={requests.utils.quote(sender_name)}"
-            f"&msg={requests.utils.quote(gift_message)}"
-            f"&shop={requests.utils.quote(CAFE24_MALL_ID)}"
-            f"&expire={expire_date}"
-        )
-
-        # 알림톡 템플릿 변수 치환
-        # 템플릿 내용 예시:
-        # "[선물 도착] #{받는분이름}님, #{보내는분이름}님이 선물을 보내셨어요!
-        #  아래 버튼을 눌러 배송지를 입력해 주세요.
-        #  ※ #{만료일}까지 입력하지 않으면 자동 취소됩니다."
-        template_args = {
-            "#{받는분이름}": receiver_name,
-            "#{보내는분이름}": sender_name,
-            "#{만료일}": expire_date,
-            "#{선물메시지}": gift_message if gift_message else "마음을 담아 보낸 선물입니다.",
-            "#{배송지입력링크}": address_url
-        }
-
-        config = Configuration()
-        config.api_key["Authorization"] = COOLSMS_API_KEY
-        config.api_key_prefix["Authorization"] = COOLSMS_API_SECRET
-
-        api = DefaultApi(ApiClient(config))
-        msg = {
-            "to": receiver_phone.replace("-", ""),
-            "from": COOLSMS_SENDER.replace("-", ""),
-            "type": "ATA",  # 알림톡
-            "kakaoOptions": {
-                "pfId": KAKAO_CHANNEL_ID,
-                "templateId": KAKAO_TEMPLATE_ID,
-                "variables": template_args,
-                "buttons": [
-                    {
-                        "buttonType": "WL",
-                        "buttonName": "배송지 입력하기",
-                        "linkMo": address_url,
-                        "linkPc": address_url
-                    }
-                ]
+        payload = {
+            "message": {
+                "to": receiver_phone.replace("-", ""),
+                "from": COOLSMS_SENDER.replace("-", ""),
+                "type": "ATA",
+                "kakaoOptions": {
+                    "pfId": KAKAO_CHANNEL_ID,
+                    "templateId": KAKAO_TEMPLATE_ID,
+                    "variables": {
+                        "#{받는분이름}": receiver_name or "고객",
+                        "#{보내는분이름}": sender_name or "고객",
+                        "#{만료일}": expire_date,
+                        "#{선물메시지}": gift_message or "마음을 담아 보낸 선물입니다.",
+                        "#{배송지입력링크}": address_url
+                    },
+                    "buttons": [
+                        {
+                            "buttonType": "WL",
+                            "buttonName": "배송지 입력하기",
+                            "linkMo": address_url,
+                            "linkPc": address_url
+                        }
+                    ]
+                }
             }
         }
-        api.send_many({"messages": [msg]})
-        logger.info(f"알림톡 발송 성공: {receiver_phone} / 주문번호: {order_id}")
-        return True
-
-    except Exception as e:
-        logger.error(f"알림톡 발송 실패: {e}")
-        # 알림톡 실패 시 SMS 대체 발송
-        return send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, token, expire_date)
-
-
-def send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, token, expire_date) -> bool:
-    """알림톡 실패 시 SMS 대체 발송"""
-    try:
-        from coolsms_python_sdk import DefaultApi, ApiClient, Configuration
-
-        address_url = (
-            f"{GIFT_ADDRESS_URL}"
-            f"?token={token}&order_id={order_id}"
-            f"&from={requests.utils.quote(sender_name)}"
-            f"&expire={expire_date}"
+        resp = requests.post(
+            "https://api.coolsms.co.kr/messages/v4/send",
+            headers={
+                "Authorization": get_coolsms_auth_header(),
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=10
         )
+        if resp.status_code in (200, 201):
+            logger.info(f"알림톡 발송 성공: {receiver_phone} / 주문번호: {order_id}")
+            return True
+        else:
+            logger.error(f"알림톡 발송 실패: {resp.status_code} {resp.text[:300]}")
+            return send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, address_url, expire_date)
+    except Exception as e:
+        logger.error(f"알림톡 발송 오류: {e}")
+        return send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, address_url, expire_date)
+
+
+def send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, address_url, expire_date) -> bool:
+    """알림톡 실패 시 SMS 대체 발송"""
+    if not COOLSMS_API_KEY:
+        return False
+    try:
         text = (
             f"[선물 도착] {receiver_name}님,\n"
             f"{sender_name}님이 선물을 보내셨어요!\n"
@@ -163,165 +170,72 @@ def send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, toke
             f"{address_url}\n"
             f"※ {expire_date}까지 입력 필요"
         )
-        config = Configuration()
-        config.api_key["Authorization"] = COOLSMS_API_KEY
-        config.api_key_prefix["Authorization"] = COOLSMS_API_SECRET
-
-        api = DefaultApi(ApiClient(config))
-        api.send_many({"messages": [{
-            "to": receiver_phone.replace("-", ""),
-            "from": COOLSMS_SENDER.replace("-", ""),
-            "type": "LMS",
-            "text": text
-        }]})
-        logger.info(f"SMS 대체 발송 성공: {receiver_phone}")
-        return True
+        payload = {
+            "message": {
+                "to": receiver_phone.replace("-", ""),
+                "from": COOLSMS_SENDER.replace("-", ""),
+                "type": "LMS",
+                "text": text
+            }
+        }
+        resp = requests.post(
+            "https://api.coolsms.co.kr/messages/v4/send",
+            headers={
+                "Authorization": get_coolsms_auth_header(),
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=10
+        )
+        if resp.status_code in (200, 201):
+            logger.info(f"SMS 대체 발송 성공: {receiver_phone}")
+            return True
+        else:
+            logger.error(f"SMS 대체 발송 실패: {resp.status_code} {resp.text[:200]}")
+            return False
     except Exception as e:
-        logger.error(f"SMS 대체 발송도 실패: {e}")
+        logger.error(f"SMS 대체 발송 오류: {e}")
         return False
 
 
-# ──────────────────────────────────────────────
-# 라우트
-# ──────────────────────────────────────────────
-
-@app.route("/health", methods=["GET"])
-def health():
-    """서버 상태 확인"""
-    return jsonify({"status": "ok", "time": datetime.now().isoformat()})
-
-
-@app.route("/webhook/cafe24/order", methods=["POST"])
-def cafe24_order_webhook():
-    """
-    카페24 주문 완료 웹훅 수신 엔드포인트
-    카페24 개발자 어드민에서 이 URL을 웹훅 URL로 등록하세요.
-    이벤트: mall.read_order (주문 완료)
-    """
-    # 서명 검증
-    if not verify_cafe24_webhook(request):
-        logger.warning("웹훅 서명 검증 실패")
-        return jsonify({"error": "Invalid signature"}), 401
-
+def get_cafe24_access_token() -> str:
+    """카페24 OAuth 액세스 토큰 획득 (캐시 포함)"""
+    global _token_cache
+    if _token_cache["token"] and time.time() < _token_cache["expires_at"] - 60:
+        return _token_cache["token"]
     try:
-        data = request.get_json(force=True)
-        logger.info(f"웹훅 수신: {json.dumps(data, ensure_ascii=False)[:300]}")
+        credentials = base64.b64encode(
+            f"{CAFE24_CLIENT_ID}:{CAFE24_CLIENT_SECRET}".encode()
+        ).decode()
+        resp = requests.post(
+            f"https://{CAFE24_MALL_ID}.cafe24api.com/api/v2/oauth/token",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": "mall.write_order"
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            _token_cache["token"] = data.get("access_token")
+            _token_cache["expires_at"] = time.time() + data.get("expires_in", 3600)
+            logger.info("카페24 액세스 토큰 갱신 성공")
+            return _token_cache["token"]
+        else:
+            logger.error(f"토큰 획득 실패: {resp.status_code} {resp.text[:200]}")
+            return None
     except Exception as e:
-        logger.error(f"웹훅 JSON 파싱 실패: {e}")
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    # 이벤트 타입 확인
-    event_name = data.get("event_name", "")
-    if event_name not in ("mall.read_order", "order_paid", ""):
-        logger.info(f"처리 대상 아닌 이벤트: {event_name}")
-        return jsonify({"status": "ignored"}), 200
-
-    # 주문 데이터 추출
-    resource = data.get("resource", {})
-    order_id = resource.get("order_id") or data.get("order_id", "")
-
-    # 주문 메모(order_memo)에서 선물 정보 파싱
-    # gift_button.html에서 hidden input으로 전달한 값들
-    order_memo     = resource.get("order_memo", "") or ""
-    is_gift        = resource.get("is_gift", "0")
-    receiver_name  = resource.get("gift_receiver_name", "")
-    receiver_phone = resource.get("gift_receiver_phone", "")
-    gift_message   = resource.get("gift_message", "")
-    sender_name    = resource.get("buyer_name", "") or resource.get("member_id", "고객")
-
-    # 선물 주문 여부 확인
-    if str(is_gift) != "1" and "선물주문" not in order_memo:
-        logger.info(f"일반 주문 (선물 아님): {order_id}")
-        return jsonify({"status": "not_gift_order"}), 200
-
-    if not receiver_phone:
-        logger.warning(f"받는 분 전화번호 없음: {order_id}")
-        return jsonify({"status": "no_receiver_phone"}), 200
-
-    # 토큰 생성
-    token = generate_token(order_id)
-    expire_date = (datetime.now() + timedelta(days=GIFT_EXPIRE_DAYS)).strftime("%Y년 %m월 %d일")
-
-    # 알림톡 발송
-    success = send_alimtalk(
-        receiver_phone=receiver_phone,
-        receiver_name=receiver_name or "고객",
-        sender_name=sender_name,
-        gift_message=gift_message,
-        order_id=order_id,
-        token=token,
-        expire_date=expire_date
-    )
-
-    if success:
-        logger.info(f"선물 알림톡 발송 완료: 주문번호={order_id}, 수신자={receiver_phone}")
-        return jsonify({"status": "success", "order_id": order_id}), 200
-    else:
-        logger.error(f"선물 알림톡 발송 실패: 주문번호={order_id}")
-        return jsonify({"status": "send_failed", "order_id": order_id}), 500
-
-
-@app.route("/gift/address", methods=["POST"])
-def save_gift_address():
-    """
-    선물 받는 사람이 배송지를 입력하면 카페24 주문에 배송지를 업데이트합니다.
-    gift_address.html 에서 fetch로 호출합니다.
-    """
-    try:
-        data = request.get_json(force=True)
-    except Exception:
-        return jsonify({"success": False, "message": "잘못된 요청입니다."}), 400
-
-    token    = data.get("token", "")
-    order_id = data.get("order_id", "")
-
-    # 토큰 검증
-    token_info = gift_tokens.get(token)
-    if not token_info:
-        return jsonify({"success": False, "message": "유효하지 않은 링크입니다."}), 400
-    if token_info.get("used"):
-        return jsonify({"success": False, "message": "이미 배송지가 입력된 선물입니다."}), 400
-    expire_str = token_info.get("expire", "")
-    try:
-        expire_dt = datetime.strptime(expire_str, "%Y-%m-%d")
-        if datetime.now() > expire_dt:
-            return jsonify({"success": False, "message": "배송지 입력 기한이 지났습니다."}), 400
-    except Exception:
-        pass
-
-    recv_name  = data.get("recv_name", "")
-    recv_phone = data.get("recv_phone", "")
-    recv_zip   = data.get("recv_zip", "")
-    recv_addr1 = data.get("recv_addr1", "")
-    recv_addr2 = data.get("recv_addr2", "")
-    recv_memo  = data.get("recv_memo", "")
-
-    if not all([recv_name, recv_phone, recv_zip, recv_addr1]):
-        return jsonify({"success": False, "message": "필수 항목을 모두 입력해 주세요."}), 400
-
-    # 카페24 API로 주문 배송지 업데이트
-    success = update_cafe24_order_address(
-        order_id=order_id,
-        name=recv_name,
-        phone=recv_phone,
-        zipcode=recv_zip,
-        address1=recv_addr1,
-        address2=recv_addr2,
-        memo=recv_memo
-    )
-
-    if success:
-        gift_tokens[token]["used"] = True
-        logger.info(f"배송지 등록 완료: 주문번호={order_id}")
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "message": "배송지 등록 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."}), 500
+        logger.error(f"토큰 요청 오류: {e}")
+        return None
 
 
 def update_cafe24_order_address(order_id, name, phone, zipcode, address1, address2, memo):
     """카페24 REST API로 주문 배송지 업데이트"""
     try:
-        # 액세스 토큰 획득 (실제 운영 시 OAuth 토큰 관리 필요)
         access_token = get_cafe24_access_token()
         if not access_token:
             logger.error("카페24 액세스 토큰 획득 실패")
@@ -350,47 +264,149 @@ def update_cafe24_order_address(order_id, name, phone, zipcode, address1, addres
             logger.info(f"카페24 배송지 업데이트 성공: {order_id}")
             return True
         else:
-            logger.error(f"카페24 배송지 업데이트 실패: {resp.status_code} {resp.text[:200]}")
+            logger.error(f"카페24 배송지 업데이트 실패: {resp.status_code} {resp.text[:300]}")
             return False
     except Exception as e:
         logger.error(f"카페24 API 호출 오류: {e}")
         return False
 
 
-def get_cafe24_access_token():
-    """카페24 OAuth 액세스 토큰 획득 (Client Credentials 방식)"""
+# ──────────────────────────────────────────────
+# 라우트
+# ──────────────────────────────────────────────
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": datetime.now().isoformat()})
+
+
+@app.route("/webhook/cafe24/order", methods=["POST"])
+def cafe24_order_webhook():
+    """카페24 주문 완료 웹훅 수신"""
+    if not verify_cafe24_webhook(request):
+        logger.warning("웹훅 서명 검증 실패")
+        return jsonify({"error": "Invalid signature"}), 401
+
     try:
-        import base64
-        credentials = base64.b64encode(
-            f"{CAFE24_CLIENT_ID}:{CAFE24_CLIENT_SECRET}".encode()
-        ).decode()
-        resp = requests.post(
-            f"https://{CAFE24_MALL_ID}.cafe24api.com/api/v2/oauth/token",
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            data={
-                "grant_type": "client_credentials",
-                "scope": "mall.write_order"
-            },
-            timeout=10
-        )
-        if resp.status_code == 200:
-            return resp.json().get("access_token")
-        else:
-            logger.error(f"토큰 획득 실패: {resp.status_code} {resp.text[:200]}")
-            return None
+        data = request.get_json(force=True)
+        logger.info(f"웹훅 수신: {json.dumps(data, ensure_ascii=False)[:300]}")
     except Exception as e:
-        logger.error(f"토큰 요청 오류: {e}")
-        return None
+        logger.error(f"웹훅 JSON 파싱 실패: {e}")
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    event_name = data.get("event_name", "")
+    if event_name not in ("mall.read_order", "order_paid", ""):
+        return jsonify({"status": "ignored"}), 200
+
+    resource = data.get("resource", {})
+    order_id       = resource.get("order_id") or data.get("order_id", "")
+    order_memo     = resource.get("order_memo", "") or ""
+    is_gift        = resource.get("is_gift", "0")
+    receiver_name  = resource.get("gift_receiver_name", "")
+    receiver_phone = resource.get("gift_receiver_phone", "")
+    gift_message   = resource.get("gift_message", "")
+    sender_name    = resource.get("buyer_name", "") or resource.get("member_id", "고객")
+
+    if str(is_gift) != "1" and "선물주문" not in order_memo:
+        return jsonify({"status": "not_gift_order"}), 200
+
+    if not receiver_phone:
+        logger.warning(f"받는 분 전화번호 없음: {order_id}")
+        return jsonify({"status": "no_receiver_phone"}), 200
+
+    token = generate_token(order_id)
+    expire_date = (datetime.now() + timedelta(days=GIFT_EXPIRE_DAYS)).strftime("%Y년 %m월 %d일")
+
+    success = send_alimtalk(
+        receiver_phone=receiver_phone,
+        receiver_name=receiver_name or "고객",
+        sender_name=sender_name,
+        gift_message=gift_message,
+        order_id=order_id,
+        token=token,
+        expire_date=expire_date
+    )
+
+    if success:
+        return jsonify({"status": "success", "order_id": order_id}), 200
+    else:
+        return jsonify({"status": "send_failed", "order_id": order_id}), 500
+
+
+@app.route("/gift/address", methods=["GET"])
+def gift_address_page():
+    """배송지 입력 페이지 (GET)"""
+    return ADDRESS_PAGE_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.route("/gift/address", methods=["POST"])
+def save_gift_address():
+    """배송지 저장 및 카페24 주문 업데이트"""
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"success": False, "message": "잘못된 요청입니다."}), 400
+
+    token    = data.get("token", "")
+    order_id = data.get("order_id", "")
+
+    token_info = gift_tokens.get(token)
+    if not token_info:
+        return jsonify({"success": False, "message": "유효하지 않은 링크입니다."}), 400
+    if token_info.get("used"):
+        return jsonify({"success": False, "message": "이미 배송지가 입력된 선물입니다."}), 400
+    try:
+        expire_dt = datetime.strptime(token_info.get("expire", ""), "%Y-%m-%d")
+        if datetime.now() > expire_dt:
+            return jsonify({"success": False, "message": "배송지 입력 기한이 지났습니다."}), 400
+    except Exception:
+        pass
+
+    recv_name  = data.get("recv_name", "").strip()
+    recv_phone = data.get("recv_phone", "").strip()
+    recv_zip   = data.get("recv_zip", "").strip()
+    recv_addr1 = data.get("recv_addr1", "").strip()
+    recv_addr2 = data.get("recv_addr2", "").strip()
+    recv_memo  = data.get("recv_memo", "").strip()
+
+    if not all([recv_name, recv_phone, recv_zip, recv_addr1]):
+        return jsonify({"success": False, "message": "이름, 연락처, 주소를 모두 입력해 주세요."}), 400
+
+    success = update_cafe24_order_address(
+        order_id=order_id,
+        name=recv_name,
+        phone=recv_phone,
+        zipcode=recv_zip,
+        address1=recv_addr1,
+        address2=recv_addr2,
+        memo=recv_memo
+    )
+
+    if success:
+        gift_tokens[token]["used"] = True
+        logger.info(f"배송지 등록 완료: 주문번호={order_id}")
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "message": "배송지 등록 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."}), 500
+
+
+@app.route("/admin/gifts")
+def admin_gifts():
+    """선물 주문 현황 조회"""
+    rows = []
+    for token, info in gift_tokens.items():
+        rows.append(f"<tr><td>{info['order_id']}</td><td>{info['expire']}</td><td>{'✅ 완료' if info['used'] else '⏳ 대기'}</td></tr>")
+    html = f"""<html><head><meta charset='UTF-8'><title>선물 주문 관리</title>
+    <style>body{{font-family:sans-serif;padding:20px}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px}}</style></head>
+    <body><h2>🎁 선물 주문 현황 (총 {len(gift_tokens)}건)</h2>
+    <table><tr><th>주문번호</th><th>만료일</th><th>상태</th></tr>{''.join(rows)}</table></body></html>"""
+    return html
 
 
 # ──────────────────────────────────────────────
-# 배송지 입력 페이지 (GET)
+# 배송지 입력 페이지 HTML
 # ──────────────────────────────────────────────
-ADDRESS_PAGE_HTML = """
-<!DOCTYPE html>
+ADDRESS_PAGE_HTML = """<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -398,8 +414,8 @@ ADDRESS_PAGE_HTML = """
 <title>선물 배송지 입력</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Apple SD Gothic Neo', sans-serif; background: #f8f8f8; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .wrap { background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 420px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+  body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: #f8f8f8; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .wrap { background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 420px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); margin: 20px; }
   .gift-icon { font-size: 48px; text-align: center; margin-bottom: 12px; }
   h2 { text-align: center; font-size: 20px; color: #222; margin-bottom: 6px; }
   .sender { text-align: center; color: #888; font-size: 14px; margin-bottom: 24px; }
@@ -414,11 +430,13 @@ ADDRESS_PAGE_HTML = """
   .submit-btn:hover { background: #444; }
   .expire { text-align: center; color: #aaa; font-size: 12px; margin-top: 16px; }
   .result { text-align: center; padding: 40px 20px; }
-  .result h2 { margin-bottom: 12px; }
 </style>
 </head>
 <body>
-<div class="wrap" id="app"></div>
+<div class="wrap" id="app">
+  <div class="gift-icon">🎁</div>
+  <p style="text-align:center;color:#aaa;">로딩 중...</p>
+</div>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
@@ -426,7 +444,7 @@ const token = params.get('token') || '';
 const orderId = params.get('order_id') || '';
 const sender = decodeURIComponent(params.get('from') || '');
 const msg = decodeURIComponent(params.get('msg') || '');
-const expire = params.get('expire') || '';
+const expire = decodeURIComponent(params.get('expire') || '');
 const app = document.getElementById('app');
 
 app.innerHTML = `
@@ -434,11 +452,11 @@ app.innerHTML = `
   <h2>${sender ? sender + '님이 선물을 보냈어요!' : '선물이 도착했어요!'}</h2>
   <p class="sender">배송지를 입력하시면 선물을 받으실 수 있습니다</p>
   ${msg ? '<div class="msg-box">💌 ' + msg + '</div>' : ''}
-  <label>받는 분 이름</label>
-  <input type="text" id="name" placeholder="이름을 입력하세요" required>
-  <label>연락처</label>
-  <input type="tel" id="phone" placeholder="010-0000-0000" required>
-  <label>우편번호</label>
+  <label>받는 분 이름 <span style="color:red">*</span></label>
+  <input type="text" id="name" placeholder="이름을 입력하세요">
+  <label>연락처 <span style="color:red">*</span></label>
+  <input type="tel" id="phone" placeholder="010-0000-0000">
+  <label>우편번호 <span style="color:red">*</span></label>
   <div class="addr-row">
     <input type="text" id="zipcode" placeholder="우편번호" readonly>
     <button type="button" class="addr-btn" onclick="searchAddr()">주소 검색</button>
@@ -481,46 +499,25 @@ async function submitAddr() {
     });
     const result = await resp.json();
     if (result.success) {
-      app.innerHTML = '<div class="result"><div style="font-size:60px">🎉</div><h2 style="color:#2ecc71">배송지가 등록되었습니다!</h2><p style="color:#888;font-size:14px">선물이 곧 배송될 예정입니다.<br>감사합니다!</p></div>';
+      app.innerHTML = '<div class="result"><div style="font-size:60px;margin-bottom:16px">🎉</div><h2 style="color:#2ecc71;margin-bottom:12px">배송지가 등록되었습니다!</h2><p style="color:#888;font-size:14px;line-height:1.6">선물이 곧 배송될 예정입니다.<br>감사합니다!</p></div>';
     } else {
       alert(result.message || '오류가 발생했습니다.');
       btn.disabled = false;
       btn.textContent = '배송지 등록하기';
     }
   } catch(e) {
-    alert('네트워크 오류가 발생했습니다.');
+    alert('네트워크 오류가 발생했습니다. 다시 시도해 주세요.');
     btn.disabled = false;
     btn.textContent = '배송지 등록하기';
   }
 }
 </script>
 </body>
-</html>
-"""
-
-@app.route("/gift/address", methods=["GET"])
-def gift_address_page():
-    """배송지 입력 페이지 (GET)"""
-    return ADDRESS_PAGE_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
-
-
-# 관리자 선물 주문 목록
-@app.route("/admin/gifts")
-def admin_gifts():
-    """선물 주문 현황 조회"""
-    rows = []
-    for token, info in gift_tokens.items():
-        rows.append(f"<tr><td>{info['order_id']}</td><td>{info['expire']}</td><td>{'✅ 완료' if info['used'] else '⏳ 대기'}</td></tr>")
-    html = f"""<html><head><meta charset='UTF-8'><title>선물 주문 관리</title>
-    <style>body{{font-family:sans-serif;padding:20px}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px}}</style></head>
-    <body><h2>🎁 선물 주문 현황 (총 {len(gift_tokens)}건)</h2>
-    <table><tr><th>주문번호</th><th>만료일</th><th>상태</th></tr>{''.join(rows)}</table></body></html>"""
-    return html
+</html>"""
 
 
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    debug = os.getenv("DEBUG", "false").lower() == "true"
     logger.info(f"선물하기 서버 시작 (포트: {port})")
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=port, debug=False)

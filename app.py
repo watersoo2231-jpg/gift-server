@@ -198,11 +198,21 @@ def send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, addr
         return False
 
 
+# 리프레시 토큰 저장소 (운영 시 DB 권장)
+_refresh_token_store = {"token": os.getenv("CAFE24_REFRESH_TOKEN", "")}
+
+
 def get_cafe24_access_token() -> str:
-    """카페24 OAuth 액세스 토큰 획득 (캐시 포함)"""
-    global _token_cache
+    """카페24 OAuth 액세스 토큰 획득 (Authorization Code 방식, 리프레시 토큰 사용)"""
+    global _token_cache, _refresh_token_store
     if _token_cache["token"] and time.time() < _token_cache["expires_at"] - 60:
         return _token_cache["token"]
+
+    refresh_token = _refresh_token_store.get("token", "")
+    if not refresh_token:
+        logger.error("리프레시 토큰 없음 - /oauth/install 로 OAuth 인증 필요")
+        return None
+
     try:
         credentials = base64.b64encode(
             f"{CAFE24_CLIENT_ID}:{CAFE24_CLIENT_SECRET}".encode()
@@ -214,19 +224,23 @@ def get_cafe24_access_token() -> str:
                 "Content-Type": "application/x-www-form-urlencoded"
             },
             data={
-                "grant_type": "client_credentials",
-                "scope": "mall.write_order"
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
             },
             timeout=10
         )
         if resp.status_code == 200:
             data = resp.json()
             _token_cache["token"] = data.get("access_token")
-            _token_cache["expires_at"] = time.time() + data.get("expires_in", 3600)
+            _token_cache["expires_at"] = time.time() + data.get("expires_in", 7200)
+            new_refresh = data.get("refresh_token")
+            if new_refresh:
+                _refresh_token_store["token"] = new_refresh
+                logger.info("리프레시 토큰 갱신 완료")
             logger.info("카페24 액세스 토큰 갱신 성공")
             return _token_cache["token"]
         else:
-            logger.error(f"토큰 획득 실패: {resp.status_code} {resp.text[:200]}")
+            logger.error(f"토큰 갱신 실패: {resp.status_code} {resp.text[:200]}")
             return None
     except Exception as e:
         logger.error(f"토큰 요청 오류: {e}")
@@ -277,7 +291,80 @@ def update_cafe24_order_address(order_id, name, phone, zipcode, address1, addres
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "time": datetime.now().isoformat()})
+    has_token = bool(_refresh_token_store.get("token"))
+    return jsonify({"status": "ok", "time": datetime.now().isoformat(), "oauth_ready": has_token})
+
+
+@app.route("/oauth/install", methods=["GET"])
+def oauth_install():
+    """카페24 OAuth 인증 시작 - 이 URL을 브라우저에서 열면 카페24 로그인 페이지로 이동"""
+    import urllib.parse
+    scope = "mall.read_order,mall.write_order"
+    state = secrets.token_urlsafe(16)
+    params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": CAFE24_CLIENT_ID,
+        "redirect_uri": f"{SERVER_URL}/oauth/callback",
+        "scope": scope,
+        "state": state
+    })
+    auth_url = f"https://{CAFE24_MALL_ID}.cafe24api.com/api/v2/oauth/authorize?{params}"
+    return f"""<html><head><meta charset='UTF-8'></head><body>
+    <h2>카페24 OAuth 인증</h2>
+    <p>아래 버튼을 클릭하여 카페24 쇼핑몰 관리자 계정으로 로그인하세요.</p>
+    <a href="{auth_url}" style="display:inline-block;padding:14px 28px;background:#222;color:#fff;text-decoration:none;border-radius:8px;font-size:16px;margin-top:20px">카페24 관리자 로그인으로 인증하기</a>
+    </body></html>"""
+
+
+@app.route("/oauth/callback", methods=["GET"])
+def oauth_callback():
+    """카페24 OAuth 콜백 - 인증 코드를 액세스 토큰으로 교환"""
+    code = request.args.get("code", "")
+    error = request.args.get("error", "")
+
+    if error:
+        return f"<h2>인증 실패: {error}</h2>", 400
+
+    if not code:
+        return "<h2>인증 코드가 없습니다.</h2>", 400
+
+    try:
+        credentials = base64.b64encode(
+            f"{CAFE24_CLIENT_ID}:{CAFE24_CLIENT_SECRET}".encode()
+        ).decode()
+        resp = requests.post(
+            f"https://{CAFE24_MALL_ID}.cafe24api.com/api/v2/oauth/token",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": f"{SERVER_URL}/oauth/callback"
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            _token_cache["token"] = data.get("access_token")
+            _token_cache["expires_at"] = time.time() + data.get("expires_in", 7200)
+            refresh_token = data.get("refresh_token", "")
+            if refresh_token:
+                _refresh_token_store["token"] = refresh_token
+            logger.info("OAuth 인증 완료 - 액세스 토큰 및 리프레시 토큰 저장")
+            return """<html><head><meta charset='UTF-8'></head><body>
+            <h2 style='color:green'>✅ OAuth 인증 완료!</h2>
+            <p>카페24 주문 API 연동이 완료되었습니다.</p>
+            <p>이제 선물하기 기능이 정상 작동합니다.</p>
+            <p style='color:#888;font-size:13px;margin-top:20px'>이 창을 닫으셔도 됩니다.</p>
+            </body></html>"""
+        else:
+            logger.error(f"토큰 교환 실패: {resp.status_code} {resp.text[:300]}")
+            return f"<h2>토큰 교환 실패: {resp.status_code}</h2><pre>{resp.text[:300]}</pre>", 400
+    except Exception as e:
+        logger.error(f"OAuth 콜백 오류: {e}")
+        return f"<h2>오류 발생: {e}</h2>", 500
 
 
 @app.route("/webhook/cafe24/order", methods=["POST"])

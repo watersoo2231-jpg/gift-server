@@ -198,8 +198,47 @@ def send_sms_fallback(receiver_phone, receiver_name, sender_name, order_id, addr
         return False
 
 
-# 리프레시 토큰 저장소 (운영 시 DB 권장)
+# 리프레시 토큰 저장소 (Railway 환경변수 CAFE24_REFRESH_TOKEN 에서 로드)
 _refresh_token_store = {"token": os.getenv("CAFE24_REFRESH_TOKEN", "")}
+
+RAILWAY_TOKEN = os.getenv("RAILWAY_TOKEN", "")
+RAILWAY_SERVICE_ID = os.getenv("RAILWAY_SERVICE_ID", "")
+RAILWAY_ENVIRONMENT_ID = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
+
+
+def save_refresh_token_to_railway(refresh_token: str):
+    """Railway 환경변수에 리프레시 토큰 영구 저장"""
+    if not RAILWAY_TOKEN or not RAILWAY_SERVICE_ID or not RAILWAY_ENVIRONMENT_ID:
+        logger.warning("Railway 토큰 미설정 - 환경변수 저장 건너뜀 (서버 재시작 시 재인증 필요)")
+        return
+    try:
+        query = """
+        mutation UpsertVariables($input: VariableCollectionUpsertInput!) {
+          variableCollectionUpsert(input: $input)
+        }
+        """
+        variables = {
+            "input": {
+                "serviceId": RAILWAY_SERVICE_ID,
+                "environmentId": RAILWAY_ENVIRONMENT_ID,
+                "variables": {"CAFE24_REFRESH_TOKEN": refresh_token}
+            }
+        }
+        resp = requests.post(
+            "https://backboard.railway.app/graphql/v2",
+            headers={
+                "Authorization": f"Bearer {RAILWAY_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json={"query": query, "variables": variables},
+            timeout=10
+        )
+        if resp.status_code == 200 and "errors" not in resp.json():
+            logger.info("Railway 환경변수에 리프레시 토큰 저장 완료")
+        else:
+            logger.error(f"Railway 환경변수 저장 실패: {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"Railway 환경변수 저장 오류: {e}")
 
 
 def get_cafe24_access_token() -> str:
@@ -236,6 +275,7 @@ def get_cafe24_access_token() -> str:
             new_refresh = data.get("refresh_token")
             if new_refresh:
                 _refresh_token_store["token"] = new_refresh
+                save_refresh_token_to_railway(new_refresh)
                 logger.info("리프레시 토큰 갱신 완료")
             logger.info("카페24 액세스 토큰 갱신 성공")
             return _token_cache["token"]
@@ -352,6 +392,7 @@ def oauth_callback():
             refresh_token = data.get("refresh_token", "")
             if refresh_token:
                 _refresh_token_store["token"] = refresh_token
+                save_refresh_token_to_railway(refresh_token)
             logger.info("OAuth 인증 완료 - 액세스 토큰 및 리프레시 토큰 저장")
             return """<html><head><meta charset='UTF-8'></head><body>
             <h2 style='color:green'>✅ OAuth 인증 완료!</h2>

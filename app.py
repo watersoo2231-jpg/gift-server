@@ -690,6 +690,21 @@ async function submitAddr() {
 
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    import subprocess
+    import sys
+    
+    port = os.getenv("PORT", "5000")
     logger.info(f"선물하기 서버 시작 (포트: {port})")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    
+    # Render 환경에서는 gunicorn 사용, 로컬에서는 Flask 개발 서버 사용
+    if os.getenv("RENDER"):
+        # Render 환경: gunicorn 사용
+        subprocess.run([
+            sys.executable, "-m", "gunicorn",
+            "-w", "2",
+            "-b", f"0.0.0.0:{port}",
+            "app:app"
+        ])
+    else:
+        # 로컬 환경: Flask 개발 서버 사용
+        app.run(host="0.0.0.0", port=int(port), debug=False)

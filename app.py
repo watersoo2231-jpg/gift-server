@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
 import logging
+from cafe24_payment import Cafe24MockClient
 
 app = Flask(__name__)
 
@@ -15,6 +16,9 @@ CORS(app,
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Cafe24 결제 클라이언트 초기화 (테스트용 Mock)
+cafe24_client = Cafe24MockClient()
 
 # 헬스 체크 엔드포인트
 @app.route('/', methods=['GET'])
@@ -94,6 +98,88 @@ def get_gift(gift_id):
         logger.error(f"Error retrieving gift: {str(e)}")
         return jsonify({
             "error": "Failed to retrieve gift",
+            "details": str(e)
+        }), 500
+
+# Cafe24 결제 엔드포인트
+@app.route('/api/payment/create', methods=['POST'])
+def create_payment():
+    try:
+        data = request.get_json()
+        logger.info(f"Payment creation request: {data}")
+        
+        # 필수 필드 검증
+        required_fields = ['gift_id', 'recipient_email', 'product_id', 'amount']
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                "error": "Missing required fields",
+                "required": required_fields
+            }), 400
+        
+        # Cafe24 결제 주문 생성
+        payment_result = cafe24_client.create_payment(
+            gift_id=data['gift_id'],
+            recipient_email=data['recipient_email'],
+            product_id=data['product_id'],
+            amount=data['amount'],
+            product_name=data.get('product_name', '선물')
+        )
+        
+        if payment_result['success']:
+            return jsonify(payment_result), 201
+        else:
+            return jsonify(payment_result), 400
+    
+    except Exception as e:
+        logger.error(f"Error creating payment: {str(e)}")
+        return jsonify({
+            "error": "Failed to create payment",
+            "details": str(e)
+        }), 500
+
+# Cafe24 결제 검증 엔드포인트
+@app.route('/api/payment/verify/<order_id>', methods=['GET'])
+def verify_payment(order_id):
+    try:
+        logger.info(f"Payment verification request: {order_id}")
+        
+        # Cafe24 결제 검증
+        verification_result = cafe24_client.verify_payment(order_id)
+        
+        if verification_result['success']:
+            return jsonify(verification_result), 200
+        else:
+            return jsonify(verification_result), 404
+    
+    except Exception as e:
+        logger.error(f"Error verifying payment: {str(e)}")
+        return jsonify({
+            "error": "Failed to verify payment",
+            "details": str(e)
+        }), 500
+
+# Cafe24 결제 취소 엔드포인트
+@app.route('/api/payment/cancel/<order_id>', methods=['POST'])
+def cancel_payment(order_id):
+    try:
+        data = request.get_json() or {}
+        logger.info(f"Payment cancellation request: {order_id}")
+        
+        # Cafe24 결제 취소
+        cancellation_result = cafe24_client.cancel_payment(
+            order_id=order_id,
+            reason=data.get('reason', 'User request')
+        )
+        
+        if cancellation_result['success']:
+            return jsonify(cancellation_result), 200
+        else:
+            return jsonify(cancellation_result), 404
+    
+    except Exception as e:
+        logger.error(f"Error cancelling payment: {str(e)}")
+        return jsonify({
+            "error": "Failed to cancel payment",
             "details": str(e)
         }), 500
 

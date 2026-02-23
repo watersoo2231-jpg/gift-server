@@ -693,17 +693,25 @@ if __name__ == "__main__":
     import subprocess
     import sys
     
-    # Render 환경에서는 PORT 환경변수가 설정되지 않을 수 있으나,
-    # 기본 포트로 10000을 사용
+    # 로컬 환경에서만 Flask 개발 서버 사용
+    # Render 환경에서는 항상 gunicorn 사용
     port = os.getenv("PORT", "10000")
     
-    # 로컬 환경에서는 PORT=5000으로 명시적으로 설정
-    if port == "5000":
+    if os.getenv("HOSTNAME") and "localhost" not in os.getenv("HOSTNAME", ""):
+        # Render/프로덕션 환경: gunicorn 사용
+        logger.info(f"프로덕션 환경 - gunicorn 실행 (포트: {port})")
+        subprocess.run([
+            sys.executable, "-m", "gunicorn",
+            "-w", "2",
+            "-b", f"0.0.0.0:{port}",
+            "app:app"
+        ])
+    elif port == "5000":
         # 로컬 환경: Flask 개발 서버 사용
         logger.info("로컬 환경 - Flask 개발 서버 실행")
         app.run(host="0.0.0.0", port=int(port), debug=False)
     else:
-        # 프로덕션 환경: gunicorn 사용
+        # 기타 프로덕션 환경: gunicorn 사용
         logger.info(f"프로덕션 환경 - gunicorn 실행 (포트: {port})")
         subprocess.run([
             sys.executable, "-m", "gunicorn",

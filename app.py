@@ -433,6 +433,23 @@ def oauth_callback():
         return f"<h2>오류 발생: {e}</h2>", 500
 
 
+@app.route("/", methods=["GET"])
+def health_check():
+    """헬스 체크 엔드포인트"""
+    return jsonify({"status": "ok", "service": "gift-server"}), 200
+
+
+@app.route("/api/status", methods=["GET"])
+def api_status():
+    """API 상태 확인 엔드포인트"""
+    return jsonify({
+        "status": "running",
+        "service": "gift-server",
+        "version": "1.0",
+        "timestamp": datetime.now().isoformat()
+    }), 200
+
+
 @app.route("/webhook/cafe24/order", methods=["POST"])
 def cafe24_order_webhook():
     """카페24 주문 완료 웹훅 수신"""

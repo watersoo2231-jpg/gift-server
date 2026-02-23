@@ -37,7 +37,7 @@ KAKAO_CHANNEL_ID   = os.getenv("KAKAO_CHANNEL_ID",   "")
 KAKAO_TEMPLATE_ID  = os.getenv("KAKAO_TEMPLATE_ID",  "")
 
 # 배송지 입력 페이지 URL (서버 자체 제공)
-SERVER_URL         = os.getenv("SERVER_URL", "https://gift-server-tuiy.onrender.com")
+SERVER_URL         = os.getenv("SERVER_URL", "https://gift-server-production-3f51.up.railway.app")
 GIFT_ADDRESS_URL   = f"{SERVER_URL}/gift/address"
 
 GIFT_EXPIRE_DAYS   = int(os.getenv("GIFT_EXPIRE_DAYS", "7"))

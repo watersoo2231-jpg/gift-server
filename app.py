@@ -693,21 +693,18 @@ if __name__ == "__main__":
     import subprocess
     import sys
     
-    port = os.getenv("PORT", "5000")
-    logger.info(f"선물하기 서버 시작 (포트: {port})")
+    port = os.getenv("PORT")
     
-    # 프로덕션 환경에서는 미리 개발중이 아닌 이상 gunicorn 사용
-    # 로컬 단순 테스트는 PORT=5000을 명시적으로 설정하여 Flask 서버 사용 가능
-    if port == "5000":
-        # 로컬 환경: Flask 개발 서버 사용
-        logger.info("로컬 환경 - Flask 개발 서버 실행")
-        app.run(host="0.0.0.0", port=int(port), debug=False)
-    else:
-        # 프로덕션 환경: gunicorn 사용
-        logger.info("프로덕션 환경 - gunicorn 실행")
+    if port:
+        # 프로덕션 환경: PORT 환경변수가 설정되면 gunicorn 사용
+        logger.info(f"프로덕션 환경 - gunicorn 실행 (포트: {port})")
         subprocess.run([
             sys.executable, "-m", "gunicorn",
             "-w", "2",
             "-b", f"0.0.0.0:{port}",
             "app:app"
         ])
+    else:
+        # 로컬 환경: PORT 환경변수가 없으면 Flask 개발 서버 사용
+        logger.info("로컬 환경 - Flask 개발 서버 실행")
+        app.run(host="0.0.0.0", port=5000, debug=False)

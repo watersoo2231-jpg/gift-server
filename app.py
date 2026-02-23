@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import requests
+from flask_cors import CORS
 
 # ──────────────────────────────────────────────
 # 설정값 (환경변수로 관리)
@@ -43,6 +44,7 @@ GIFT_EXPIRE_DAYS   = int(os.getenv("GIFT_EXPIRE_DAYS", "7"))
 
 # ──────────────────────────────────────────────
 app = Flask(__name__)
+CORS(app)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 

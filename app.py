@@ -335,9 +335,23 @@ def health():
 def create_gift():
     try:
         data = request.get_json()
-        required = ['recipient_email', 'product_id', 'amount']
-        if not data or not all(f in data for f in required):
-            return jsonify({"error": "Missing required fields", "required": required}), 400
+        # recipient_phone 또는 recipient_email 중 하나만 있어도 OK
+        if not data:
+            return jsonify({"error": "Missing request body"}), 400
+        if not data.get('recipient_phone') and not data.get('recipient_email'):
+            return jsonify({"error": "recipient_phone 또는 recipient_email 중 하나는 필수입니다."}), 400
+        if not data.get('product_id'):
+            return jsonify({"error": "product_id는 필수입니다."}), 400
+
+        # amount가 없거나 0이면 0으로 처리 (카페24 변수 치환 실패 대비)
+        try:
+            amount = int(data.get('amount', 0))
+        except (ValueError, TypeError):
+            amount = 0
+
+        # recipient_email이 없으면 전화번호 기반으로 생성
+        recipient_phone = data.get('recipient_phone', '').replace('-', '')
+        recipient_email = data.get('recipient_email') or f"{recipient_phone}@gift.local"
 
         gift_id = f"gift_{uuid.uuid4().hex[:12]}"
         now = datetime.now().isoformat()
@@ -347,12 +361,25 @@ def create_gift():
         db = get_db()
         db.execute(
             "INSERT INTO gifts (gift_id, recipient_email, recipient_phone, product_id, product_name, amount, sender_name, gift_message, status, created_at, updated_at, address_token, expire_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (gift_id, data['recipient_email'], data.get('recipient_phone', ''), data['product_id'], data.get('product_name', '선물'), data['amount'], data.get('sender_name', ''), data.get('gift_message', ''), 'pending', now, now, address_token, expire_at)
+            (gift_id, recipient_email, recipient_phone, data['product_id'], data.get('product_name', '선물'), amount, data.get('sender_name', ''), data.get('gift_message', ''), 'pending', now, now, address_token, expire_at)
         )
         db.commit()
 
+        # 알림톡/SMS 발송 (전화번호가 있을 경우)
+        if recipient_phone:
+            expire_str = (datetime.now() + timedelta(days=GIFT_EXPIRE_DAYS)).strftime("%Y년 %m월 %d일")
+            send_alimtalk(
+                receiver_phone=recipient_phone,
+                receiver_name=data.get('recipient_name', '고객'),
+                sender_name=data.get('sender_name', '고객'),
+                gift_message=data.get('gift_message', ''),
+                order_id=gift_id,
+                token=address_token,
+                expire_date=expire_str
+            )
+
         logger.info(f"Gift created: {gift_id}")
-        return jsonify({"success": True, "gift_id": gift_id, "recipient_email": data['recipient_email'], "product_id": data['product_id'], "amount": data['amount'], "status": "pending", "created_at": now}), 201
+        return jsonify({"success": True, "gift_id": gift_id, "recipient_email": recipient_email, "product_id": data['product_id'], "amount": amount, "status": "pending", "created_at": now}), 201
 
     except Exception as e:
         logger.error(f"Error creating gift: {e}")
@@ -378,11 +405,16 @@ def get_gift(gift_id):
 def create_payment():
     try:
         data = request.get_json()
-        required = ['gift_id', 'recipient_email', 'product_id', 'amount']
-        if not data or not all(f in data for f in required):
-            return jsonify({"error": "Missing required fields", "required": required}), 400
+        if not data or not data.get('gift_id'):
+            return jsonify({"error": "gift_id는 필수입니다."}), 400
+
+        try:
+            amount = int(data.get('amount', 0))
+        except (ValueError, TypeError):
+            amount = 0
 
         order_id = data['gift_id']
+        customer_email = data.get('recipient_email') or f"{data.get('recipient_phone','unknown')}@gift.local"
         now = datetime.now().isoformat()
 
         db = get_db()
@@ -392,7 +424,7 @@ def create_payment():
 
         db.execute(
             "INSERT INTO payments (order_id, gift_id, amount, status, customer_email, product_id, product_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (order_id, data['gift_id'], data['amount'], 'pending', data['recipient_email'], data['product_id'], data.get('product_name', '선물'), now, now)
+            (order_id, data['gift_id'], amount, 'pending', customer_email, data.get('product_id',''), data.get('product_name', '선물'), now, now)
         )
         db.commit()
 

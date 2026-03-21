@@ -3,66 +3,76 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MMORPG - 왕국의 전설</title>
+<title>MMORPG - 네오 서울 2077</title>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0a0a0f; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+body { background: #050b12; color: #eee; font-family: 'Segoe UI', monospace; overflow: hidden; }
 
 /* ── 로비 ── */
 #lobby {
   position: fixed; inset: 0;
-  background: radial-gradient(ellipse at center, #1a0a2e 0%, #0a0a0f 100%);
+  background: radial-gradient(ellipse at center, #001a2e 0%, #050b12 100%);
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   z-index: 100;
 }
+#lobby::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.02) 2px, rgba(0,229,255,0.02) 4px);
+  pointer-events: none;
+}
 #lobby h1 {
   font-size: 3.2rem; font-weight: 900;
-  background: linear-gradient(135deg, #ffd700, #ff6b35, #c471ed);
+  background: linear-gradient(135deg, #00e5ff, #00ff88, #e040fb);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  text-shadow: none; margin-bottom: 10px; letter-spacing: 2px;
+  text-shadow: none; margin-bottom: 10px; letter-spacing: 4px;
+  text-transform: uppercase;
 }
-#lobby .subtitle { color: #888; margin-bottom: 40px; font-size: 1rem; }
+#lobby .subtitle { color: #00e5ff88; margin-bottom: 40px; font-size: 0.95rem; letter-spacing: 2px; }
 
 .lobby-form {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 16px; padding: 36px 40px;
-  width: 480px; backdrop-filter: blur(10px);
+  background: rgba(0,20,35,0.85);
+  border: 1px solid rgba(0,229,255,0.25);
+  border-radius: 12px; padding: 36px 40px;
+  width: 520px; backdrop-filter: blur(16px);
+  box-shadow: 0 0 40px rgba(0,229,255,0.08), inset 0 0 40px rgba(0,0,0,0.3);
 }
-.lobby-form label { display: block; color: #aaa; font-size: 0.85rem; margin-bottom: 6px; margin-top: 18px; }
+.lobby-form label { display: block; color: #00e5ff99; font-size: 0.8rem; margin-bottom: 6px; margin-top: 18px; letter-spacing: 1px; text-transform: uppercase; }
 .lobby-form input[type=text] {
   width: 100%; padding: 10px 14px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 8px; color: #fff; font-size: 1rem; outline: none;
+  background: rgba(0,229,255,0.06);
+  border: 1px solid rgba(0,229,255,0.2);
+  border-radius: 6px; color: #00e5ff; font-size: 1rem; outline: none; font-family: monospace;
 }
-.lobby-form input:focus { border-color: #c471ed; }
+.lobby-form input:focus { border-color: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,0.3); }
 
 .class-grid {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 6px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 6px;
 }
 .class-card {
-  cursor: pointer; border-radius: 10px;
-  border: 2px solid rgba(255,255,255,0.1);
+  cursor: pointer; border-radius: 8px;
+  border: 1px solid rgba(0,229,255,0.15);
   padding: 12px 6px; text-align: center;
-  transition: all .2s; background: rgba(255,255,255,0.04);
+  transition: all .2s; background: rgba(0,229,255,0.03);
 }
-.class-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.3); }
-.class-card.selected { border-color: #ffd700; background: rgba(255,215,0,0.1); }
+.class-card:hover { transform: translateY(-3px); border-color: rgba(0,229,255,0.5); box-shadow: 0 4px 20px rgba(0,229,255,0.15); }
+.class-card.selected { border-color: #00e5ff; background: rgba(0,229,255,0.1); box-shadow: 0 0 20px rgba(0,229,255,0.2); }
 .class-icon { font-size: 1.8rem; margin-bottom: 4px; }
-.class-name { font-size: 0.75rem; color: #ccc; font-weight: 600; }
-.class-desc { font-size: 0.6rem; color: #777; margin-top: 3px; line-height: 1.3; }
+.class-name { font-size: 0.72rem; color: #00e5ff; font-weight: 700; letter-spacing: 0.5px; }
+.class-desc { font-size: 0.58rem; color: #558; margin-top: 3px; line-height: 1.3; }
 
 .start-btn {
   width: 100%; margin-top: 24px; padding: 14px;
-  background: linear-gradient(135deg, #c471ed, #f64f59);
-  border: none; border-radius: 10px;
-  color: #fff; font-size: 1.1rem; font-weight: 700;
-  cursor: pointer; transition: opacity .2s;
+  background: linear-gradient(135deg, #00e5ff22, #00ff8822);
+  border: 1px solid #00e5ff;
+  border-radius: 8px;
+  color: #00e5ff; font-size: 1.1rem; font-weight: 700;
+  cursor: pointer; transition: all .2s; letter-spacing: 2px; text-transform: uppercase;
+  font-family: monospace;
 }
-.start-btn:hover { opacity: 0.85; }
+.start-btn:hover { background: linear-gradient(135deg, #00e5ff44, #00ff8844); box-shadow: 0 0 20px rgba(0,229,255,0.4); }
 
 /* ── 게임 ── */
 #game { display: none; position: fixed; inset: 0; }
@@ -74,20 +84,22 @@ canvas { display: block; cursor: crosshair; }
   pointer-events: none; user-select: none;
 }
 .hud-box {
-  background: rgba(0,0,0,0.65);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 10px; padding: 10px 14px;
-  margin-bottom: 8px; min-width: 220px;
+  background: rgba(0,10,20,0.8);
+  border: 1px solid rgba(0,229,255,0.2);
+  border-radius: 8px; padding: 10px 14px;
+  margin-bottom: 8px; min-width: 230px;
+  box-shadow: 0 0 20px rgba(0,229,255,0.05);
+  font-family: monospace;
 }
-.hud-name { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.hud-name { font-size: 0.95rem; font-weight: 700; color: #00e5ff; margin-bottom: 6px; letter-spacing: 1px; }
 .bar-wrap { margin-bottom: 4px; }
-.bar-label { font-size: 0.7rem; color: #aaa; margin-bottom: 2px; }
-.bar-bg { height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 5px; transition: width 0.15s; }
-.hp-bar { background: linear-gradient(90deg, #e53935, #ef9a9a); }
-.mp-bar { background: linear-gradient(90deg, #1565C0, #90CAF9); }
-.exp-bar { background: linear-gradient(90deg, #F9A825, #FFF176); }
-.hud-stats { font-size: 0.72rem; color: #ccc; margin-top: 6px; display: flex; gap: 10px; }
+.bar-label { font-size: 0.68rem; color: #00e5ff88; margin-bottom: 2px; letter-spacing: 0.5px; }
+.bar-bg { height: 8px; background: rgba(0,229,255,0.08); border-radius: 4px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.15s; }
+.hp-bar { background: linear-gradient(90deg, #ff1744, #ff6090); }
+.mp-bar { background: linear-gradient(90deg, #00e5ff, #80ffff); }
+.exp-bar { background: linear-gradient(90deg, #e040fb, #ea80fc); }
+.hud-stats { font-size: 0.7rem; color: #00e5ffaa; margin-top: 6px; display: flex; gap: 10px; }
 
 /* ── 스킬바 ── */
 #skillbar {
@@ -96,19 +108,19 @@ canvas { display: block; cursor: crosshair; }
   pointer-events: none;
 }
 .skill-slot {
-  width: 60px; height: 60px;
-  background: rgba(0,0,0,0.7);
-  border: 2px solid rgba(255,255,255,0.2);
-  border-radius: 10px; display: flex; flex-direction: column;
+  width: 62px; height: 62px;
+  background: rgba(0,10,20,0.85);
+  border: 1px solid rgba(0,229,255,0.25);
+  border-radius: 8px; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   position: relative; cursor: pointer; pointer-events: all;
-  transition: border-color .2s;
+  transition: all .2s; font-family: monospace;
 }
-.skill-slot:hover { border-color: rgba(255,255,255,0.5); }
-.skill-slot.ready { border-color: #ffd700; }
+.skill-slot:hover { border-color: rgba(0,229,255,0.7); box-shadow: 0 0 15px rgba(0,229,255,0.3); }
+.skill-slot.ready { border-color: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,0.2); }
 .skill-icon { font-size: 1.5rem; }
 .skill-name-label { font-size: 0.55rem; color: #ccc; margin-top: 2px; text-align: center; padding: 0 2px; }
-.skill-key { font-size: 0.65rem; color: #ffd700; font-weight: 700; }
+.skill-key { font-size: 0.65rem; color: #00e5ff; font-weight: 700; }
 .skill-cd-overlay {
   position: absolute; inset: 0; background: rgba(0,0,0,0.65);
   display: flex; align-items: center; justify-content: center;
@@ -118,39 +130,40 @@ canvas { display: block; cursor: crosshair; }
 /* ── 미니맵 ── */
 #minimap {
   position: fixed; top: 12px; right: 12px;
-  background: rgba(0,0,0,0.7);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 8px; overflow: hidden;
+  background: rgba(0,10,20,0.85);
+  border: 1px solid rgba(0,229,255,0.2);
+  border-radius: 6px; overflow: hidden;
+  box-shadow: 0 0 15px rgba(0,229,255,0.1);
 }
 
 /* ── 채팅 ── */
 #chatbox {
   position: fixed; bottom: 90px; left: 12px;
-  width: 320px;
+  width: 320px; font-family: monospace;
 }
 #chat-log {
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 8px 8px 0 0;
+  background: rgba(0,10,20,0.75);
+  border: 1px solid rgba(0,229,255,0.12);
+  border-radius: 6px 6px 0 0;
   height: 150px; overflow-y: auto;
-  padding: 8px 10px; font-size: 0.78rem; line-height: 1.6;
+  padding: 8px 10px; font-size: 0.75rem; line-height: 1.6;
 }
-#chat-log::-webkit-scrollbar { width: 4px; }
-#chat-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+#chat-log::-webkit-scrollbar { width: 3px; }
+#chat-log::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.25); border-radius: 2px; }
 #chat-input {
   display: flex;
 }
 #chat-text {
   flex: 1; padding: 7px 10px;
-  background: rgba(0,0,0,0.6);
-  border: 1px solid rgba(255,255,255,0.1); border-top: none;
-  border-radius: 0 0 0 8px; color: #fff; font-size: 0.82rem; outline: none;
+  background: rgba(0,10,20,0.85);
+  border: 1px solid rgba(0,229,255,0.12); border-top: none;
+  border-radius: 0 0 0 6px; color: #00e5ff; font-size: 0.78rem; outline: none; font-family: monospace;
 }
 #chat-send {
   padding: 7px 14px;
-  background: rgba(196,113,237,0.7);
-  border: 1px solid rgba(255,255,255,0.1); border-top: none; border-left: none;
-  border-radius: 0 0 8px 0; color: #fff; cursor: pointer; font-size: 0.82rem;
+  background: rgba(0,229,255,0.15);
+  border: 1px solid rgba(0,229,255,0.12); border-top: none; border-left: none;
+  border-radius: 0 0 6px 0; color: #00e5ff; cursor: pointer; font-size: 0.78rem; font-family: monospace;
 }
 
 /* ── 알림 ── */
@@ -177,20 +190,22 @@ canvas { display: block; cursor: crosshair; }
   align-items: center; justify-content: center;
   flex-direction: column; z-index: 50;
 }
-#dead-screen h2 { font-size: 2.5rem; color: #f44336; margin-bottom: 20px; }
+#dead-screen h2 { font-size: 2rem; margin-bottom: 20px; }
 #respawn-btn {
-  padding: 14px 40px; background: linear-gradient(135deg, #f44336, #e91e63);
-  border: none; border-radius: 10px; color: #fff;
-  font-size: 1.1rem; font-weight: 700; cursor: pointer;
+  padding: 14px 40px;
+  background: rgba(0,229,255,0.1);
+  border: 1px solid #00e5ff; border-radius: 6px; color: #00e5ff;
+  font-size: 1.1rem; font-weight: 700; cursor: pointer; font-family: monospace; letter-spacing: 2px;
 }
+#respawn-btn:hover { background: rgba(0,229,255,0.2); box-shadow: 0 0 20px rgba(0,229,255,0.4); }
 
 /* ── 조작법 ── */
 #controls-hint {
   position: fixed; bottom: 14px; right: 14px;
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px; padding: 10px 14px;
-  font-size: 0.72rem; color: #888; line-height: 1.8;
+  background: rgba(0,10,20,0.75);
+  border: 1px solid rgba(0,229,255,0.1);
+  border-radius: 6px; padding: 10px 14px;
+  font-size: 0.7rem; color: #00e5ff55; line-height: 1.8; font-family: monospace;
 }
 </style>
 </head>
@@ -198,14 +213,14 @@ canvas { display: block; cursor: crosshair; }
 
 <!-- ── 로비 ── -->
 <div id="lobby">
-  <h1>⚔️ 왕국의 전설</h1>
-  <p class="subtitle">실시간 멀티플레이 MMORPG</p>
+  <h1>⚡ 네오 서울 2077</h1>
+  <p class="subtitle">// REALTIME MULTIPLAYER MMORPG //</p>
   <div class="lobby-form">
-    <label>닉네임 (최대 12자)</label>
-    <input type="text" id="player-name" maxlength="12" placeholder="영웅의 이름을 입력하세요" value="용사">
-    <label>직업 선택</label>
+    <label>// 콜사인 (최대 12자)</label>
+    <input type="text" id="player-name" maxlength="12" placeholder="콜사인을 입력하세요" value="용병">
+    <label>// 직업 선택</label>
     <div class="class-grid" id="class-grid"></div>
-    <button class="start-btn" onclick="startGame()">🗡️ 게임 시작</button>
+    <button class="start-btn" onclick="startGame()">▶ CONNECT</button>
   </div>
 </div>
 
@@ -216,7 +231,7 @@ canvas { display: block; cursor: crosshair; }
   <!-- HUD -->
   <div id="hud">
     <div class="hud-box">
-      <div class="hud-name" id="hud-name">용사 Lv.1</div>
+      <div class="hud-name" id="hud-name">용병 Lv.1</div>
       <div class="bar-wrap">
         <div class="bar-label">HP <span id="hp-text"></span></div>
         <div class="bar-bg"><div class="bar-fill hp-bar" id="hp-bar" style="width:100%"></div></div>
@@ -270,8 +285,8 @@ canvas { display: block; cursor: crosshair; }
 
   <!-- 사망 -->
   <div id="dead-screen" style="display:none; display:flex; display:none;">
-    <h2>💀 전사하셨습니다</h2>
-    <button id="respawn-btn" onclick="respawn()">부활하기</button>
+    <h2 style="color:#00e5ff; font-family:monospace; letter-spacing:3px;">// CONNECTION LOST //</h2>
+    <button id="respawn-btn" onclick="respawn()">▶ RECONNECT</button>
   </div>
 
   <!-- 조작법 -->
@@ -287,25 +302,27 @@ canvas { display: block; cursor: crosshair; }
 // ──────────────────────────────────────────────────────────────
 // 클래스 데이터
 const CLASSES = {
-  '기사':    { icon:'🛡️', color:'#1565C0', desc:'높은 방어력과 체력' },
-  '요정':    { icon:'🧚', color:'#F06292', desc:'빠른 속도와 원거리' },
-  '마법사':  { icon:'🧙', color:'#7B1FA2', desc:'강력한 마법 공격' },
-  '군주':    { icon:'👑', color:'#F9A825', desc:'균형 잡힌 전투' },
-  '다크엘프':{ icon:'🌑', color:'#4A148C', desc:'빠른 어둠 마법사' },
+  '건슬링거': { icon:'🔫', color:'#FF6D00', desc:'빠른 연사 딜러' },
+  '메카닉':   { icon:'🤖', color:'#00BFA5', desc:'드론&방어 탱커' },
+  '해커':     { icon:'💻', color:'#00E5FF', desc:'EMP 마법사' },
+  '닌자':     { icon:'🥷', color:'#E040FB', desc:'초고속 암살자' },
+  '헤비건너': { icon:'🚀', color:'#F9A825', desc:'중화기 포격수' },
 };
 const SKILL_ICONS = {
-  '방패치기':'🛡️', '돌격':'⚡', '빛의 화살':'✨', '치유의 빛':'💚',
-  '파이어볼':'🔥', '블리자드':'❄️', '왕의 분노':'👑', '영역 지배':'🌀',
-  '어둠의 화살':'🏹', '암흑 폭발':'💜',
+  '연사':'🔫', '스나이퍼샷':'🎯',
+  '드론 폭탄':'💣', '방어막':'🛡️',
+  '해킹 펄스':'💻', 'EMP 폭발':'⚡',
+  '표창 연격':'🥷', '그림자 폭발':'🌀',
+  '미사일 발사':'🚀', '위성 포격':'🛸',
 };
 
 // ──────────────────────────────────────────────────────────────
 // 로비 구성
 const classGrid = document.getElementById('class-grid');
-let selectedClass = '기사';
+let selectedClass = '건슬링거';
 Object.entries(CLASSES).forEach(([name, info]) => {
   const card = document.createElement('div');
-  card.className = 'class-card' + (name === '기사' ? ' selected' : '');
+  card.className = 'class-card' + (name === '건슬링거' ? ' selected' : '');
   card.innerHTML = `<div class="class-icon">${info.icon}</div>
     <div class="class-name">${name}</div>
     <div class="class-desc">${info.desc}</div>`;
@@ -349,7 +366,7 @@ window.addEventListener('resize', resize);
 // ──────────────────────────────────────────────────────────────
 // 시작
 function startGame() {
-  const name = document.getElementById('player-name').value.trim() || '용사';
+  const name = document.getElementById('player-name').value.trim() || '용병';
   document.getElementById('lobby').style.display = 'none';
   document.getElementById('game').style.display = 'block';
 
@@ -600,27 +617,28 @@ function gameLoop(ts) {
   requestAnimationFrame(gameLoop);
 }
 
-// ── 맵 타일 패턴 ──
+// ── 맵 타일 패턴 (사이버펑크 그리드) ──
 let mapPattern = null;
 function getMapPattern() {
   if (mapPattern) return mapPattern;
   const tc = document.createElement('canvas');
-  tc.width = 64; tc.height = 64;
+  tc.width = 80; tc.height = 80;
   const tctx = tc.getContext('2d');
-  tctx.fillStyle = '#1a2a1a';
-  tctx.fillRect(0, 0, 64, 64);
-  tctx.strokeStyle = '#1e2e1e';
+  tctx.fillStyle = '#050b12';
+  tctx.fillRect(0, 0, 80, 80);
+  tctx.strokeStyle = 'rgba(0,229,255,0.07)';
   tctx.lineWidth = 1;
   tctx.beginPath();
-  tctx.moveTo(0, 32); tctx.lineTo(64, 32);
-  tctx.moveTo(32, 0); tctx.lineTo(32, 64);
+  tctx.moveTo(0, 40); tctx.lineTo(80, 40);
+  tctx.moveTo(40, 0); tctx.lineTo(40, 80);
   tctx.stroke();
-  // 약간의 잔디
-  tctx.fillStyle = '#1c2e1c';
-  for (let i = 0; i < 4; i++) {
-    const rx = Math.random() * 64, ry = Math.random() * 64;
-    tctx.fillRect(rx, ry, 3, 3);
-  }
+  // 크로스 포인트 강조
+  tctx.strokeStyle = 'rgba(0,229,255,0.15)';
+  tctx.lineWidth = 0.5;
+  tctx.beginPath();
+  tctx.moveTo(38, 40); tctx.lineTo(42, 40);
+  tctx.moveTo(40, 38); tctx.lineTo(40, 42);
+  tctx.stroke();
   mapPattern = ctx.createPattern(tc, 'repeat');
   return mapPattern;
 }
@@ -632,15 +650,18 @@ function draw() {
 
   // ── 맵 배경 ──
   ctx.save();
-  ctx.translate(camX % 64, camY % 64);
-  ctx.fillStyle = getMapPattern() || '#1a2a1a';
-  ctx.fillRect(-64, -64, canvas.width + 128, canvas.height + 128);
+  ctx.translate(camX % 80, camY % 80);
+  ctx.fillStyle = getMapPattern() || '#050b12';
+  ctx.fillRect(-80, -80, canvas.width + 160, canvas.height + 160);
   ctx.restore();
 
   // ── 맵 경계 ──
-  ctx.strokeStyle = '#2a4a2a';
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(0,229,255,0.3)';
+  ctx.lineWidth = 3;
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = '#00e5ff';
   ctx.strokeRect(0, 0, mapWidth, mapHeight);
+  ctx.shadowBlur = 0;
 
   // ── 투사체 ──
   for (const [pid, proj] of Object.entries(gameState.projectiles)) {
@@ -668,13 +689,18 @@ function draw() {
     ctx.shadowBlur = 8;
     ctx.shadowColor = mob.color || '#888';
     ctx.beginPath();
-    if (mob.type === 'dragon') {
-      // 드래곤은 다이아몬드 형태
-      ctx.moveTo(sx, sy - sz);
-      ctx.lineTo(sx + sz * 0.7, sy);
-      ctx.lineTo(sx, sy + sz);
-      ctx.lineTo(sx - sz * 0.7, sy);
+    if (mob.type === 'neo_boss') {
+      // 네오 보스는 헥사곤 형태
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const bx = sx + Math.cos(angle) * sz;
+        const by = sy + Math.sin(angle) * sz;
+        i === 0 ? ctx.moveTo(bx, by) : ctx.lineTo(bx, by);
+      }
       ctx.closePath();
+    } else if (mob.type === 'cyborg' || mob.type === 'mech_guard') {
+      // 로봇 계열은 사각형
+      ctx.rect(sx - sz * 0.8, sy - sz * 0.9, sz * 1.6, sz * 1.8);
     } else {
       ctx.arc(sx, sy, sz, 0, Math.PI * 2);
     }

@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MMORPG - 왕국의 전설</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+
+/* ── 로비 ── */
+#lobby {
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, #1a0a2e 0%, #0a0a0f 100%);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 100;
+}
+#lobby h1 {
+  font-size: 3.2rem; font-weight: 900;
+  background: linear-gradient(135deg, #ffd700, #ff6b35, #c471ed);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  text-shadow: none; margin-bottom: 10px; letter-spacing: 2px;
+}
+#lobby .subtitle { color: #888; margin-bottom: 40px; font-size: 1rem; }
+
+.lobby-form {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px; padding: 36px 40px;
+  width: 480px; backdrop-filter: blur(10px);
+}
+.lobby-form label { display: block; color: #aaa; font-size: 0.85rem; margin-bottom: 6px; margin-top: 18px; }
+.lobby-form input[type=text] {
+  width: 100%; padding: 10px 14px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px; color: #fff; font-size: 1rem; outline: none;
+}
+.lobby-form input:focus { border-color: #c471ed; }
+
+.class-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 6px;
+}
+.class-card {
+  cursor: pointer; border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.1);
+  padding: 12px 6px; text-align: center;
+  transition: all .2s; background: rgba(255,255,255,0.04);
+}
+.class-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.3); }
+.class-card.selected { border-color: #ffd700; background: rgba(255,215,0,0.1); }
+.class-icon { font-size: 1.8rem; margin-bottom: 4px; }
+.class-name { font-size: 0.75rem; color: #ccc; font-weight: 600; }
+.class-desc { font-size: 0.6rem; color: #777; margin-top: 3px; line-height: 1.3; }
+
+.start-btn {
+  width: 100%; margin-top: 24px; padding: 14px;
+  background: linear-gradient(135deg, #c471ed, #f64f59);
+  border: none; border-radius: 10px;
+  color: #fff; font-size: 1.1rem; font-weight: 700;
+  cursor: pointer; transition: opacity .2s;
+}
+.start-btn:hover { opacity: 0.85; }
+
+/* ── 게임 ── */
+#game { display: none; position: fixed; inset: 0; }
+canvas { display: block; cursor: crosshair; }
+
+/* ── HUD ── */
+#hud {
+  position: fixed; top: 12px; left: 12px;
+  pointer-events: none; user-select: none;
+}
+.hud-box {
+  background: rgba(0,0,0,0.65);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px; padding: 10px 14px;
+  margin-bottom: 8px; min-width: 220px;
+}
+.hud-name { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.bar-wrap { margin-bottom: 4px; }
+.bar-label { font-size: 0.7rem; color: #aaa; margin-bottom: 2px; }
+.bar-bg { height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 5px; transition: width 0.15s; }
+.hp-bar { background: linear-gradient(90deg, #e53935, #ef9a9a); }
+.mp-bar { background: linear-gradient(90deg, #1565C0, #90CAF9); }
+.exp-bar { background: linear-gradient(90deg, #F9A825, #FFF176); }
+.hud-stats { font-size: 0.72rem; color: #ccc; margin-top: 6px; display: flex; gap: 10px; }
+
+/* ── 스킬바 ── */
+#skillbar {
+  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 10px; align-items: flex-end;
+  pointer-events: none;
+}
+.skill-slot {
+  width: 60px; height: 60px;
+  background: rgba(0,0,0,0.7);
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 10px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  position: relative; cursor: pointer; pointer-events: all;
+  transition: border-color .2s;
+}
+.skill-slot:hover { border-color: rgba(255,255,255,0.5); }
+.skill-slot.ready { border-color: #ffd700; }
+.skill-icon { font-size: 1.5rem; }
+.skill-name-label { font-size: 0.55rem; color: #ccc; margin-top: 2px; text-align: center; padding: 0 2px; }
+.skill-key { font-size: 0.65rem; color: #ffd700; font-weight: 700; }
+.skill-cd-overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.65);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; font-size: 1rem; font-weight: 700; color: #fff;
+}
+
+/* ── 미니맵 ── */
+#minimap {
+  position: fixed; top: 12px; right: 12px;
+  background: rgba(0,0,0,0.7);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px; overflow: hidden;
+}
+
+/* ── 채팅 ── */
+#chatbox {
+  position: fixed; bottom: 90px; left: 12px;
+  width: 320px;
+}
+#chat-log {
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px 8px 0 0;
+  height: 150px; overflow-y: auto;
+  padding: 8px 10px; font-size: 0.78rem; line-height: 1.6;
+}
+#chat-log::-webkit-scrollbar { width: 4px; }
+#chat-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+#chat-input {
+  display: flex;
+}
+#chat-text {
+  flex: 1; padding: 7px 10px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.1); border-top: none;
+  border-radius: 0 0 0 8px; color: #fff; font-size: 0.82rem; outline: none;
+}
+#chat-send {
+  padding: 7px 14px;
+  background: rgba(196,113,237,0.7);
+  border: 1px solid rgba(255,255,255,0.1); border-top: none; border-left: none;
+  border-radius: 0 0 8px 0; color: #fff; cursor: pointer; font-size: 0.82rem;
+}
+
+/* ── 알림 ── */
+#notify {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  pointer-events: none; text-align: center;
+}
+.notify-msg {
+  font-size: 1.4rem; font-weight: 700;
+  padding: 12px 24px; border-radius: 10px;
+  margin-bottom: 8px; animation: fadeUp 2s ease forwards;
+}
+@keyframes fadeUp {
+  0% { opacity: 0; transform: translateY(20px); }
+  20% { opacity: 1; transform: translateY(0); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-30px); }
+}
+
+/* ── 사망 ── */
+#dead-screen {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.8);
+  align-items: center; justify-content: center;
+  flex-direction: column; z-index: 50;
+}
+#dead-screen h2 { font-size: 2.5rem; color: #f44336; margin-bottom: 20px; }
+#respawn-btn {
+  padding: 14px 40px; background: linear-gradient(135deg, #f44336, #e91e63);
+  border: none; border-radius: 10px; color: #fff;
+  font-size: 1.1rem; font-weight: 700; cursor: pointer;
+}
+
+/* ── 조작법 ── */
+#controls-hint {
+  position: fixed; bottom: 14px; right: 14px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; padding: 10px 14px;
+  font-size: 0.72rem; color: #888; line-height: 1.8;
+}
+</style>
+</head>
+<body>
+
+<!-- ── 로비 ── -->
+<div id="lobby">
+  <h1>⚔️ 왕국의 전설</h1>
+  <p class="subtitle">실시간 멀티플레이 MMORPG</p>
+  <div class="lobby-form">
+    <label>닉네임 (최대 12자)</label>
+    <input type="text" id="player-name" maxlength="12" placeholder="영웅의 이름을 입력하세요" value="용사">
+    <label>직업 선택</label>
+    <div class="class-grid" id="class-grid"></div>
+    <button class="start-btn" onclick="startGame()">🗡️ 게임 시작</button>
+  </div>
+</div>
+
+<!-- ── 게임 ── -->
+<div id="game">
+  <canvas id="canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-box">
+      <div class="hud-name" id="hud-name">용사 Lv.1</div>
+      <div class="bar-wrap">
+        <div class="bar-label">HP <span id="hp-text"></span></div>
+        <div class="bar-bg"><div class="bar-fill hp-bar" id="hp-bar" style="width:100%"></div></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-label">MP <span id="mp-text"></span></div>
+        <div class="bar-bg"><div class="bar-fill mp-bar" id="mp-bar" style="width:100%"></div></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-label">EXP <span id="exp-text"></span></div>
+        <div class="bar-bg"><div class="bar-fill exp-bar" id="exp-bar" style="width:0%"></div></div>
+      </div>
+      <div class="hud-stats">
+        <span>💰 <span id="gold-text">0</span>G</span>
+        <span>⚔️ ATK <span id="atk-text">0</span></span>
+        <span>🛡️ DEF <span id="def-text">0</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 스킬바 -->
+  <div id="skillbar">
+    <div class="skill-slot" id="skill-0" onclick="useSkill(0)">
+      <div class="skill-icon" id="skill-icon-0">✨</div>
+      <div class="skill-name-label" id="skill-label-0">스킬1</div>
+      <div class="skill-key">Z</div>
+      <div class="skill-cd-overlay" id="skill-cd-0" style="display:none">0</div>
+    </div>
+    <div class="skill-slot" id="skill-1" onclick="useSkill(1)">
+      <div class="skill-icon" id="skill-icon-1">💥</div>
+      <div class="skill-name-label" id="skill-label-1">스킬2</div>
+      <div class="skill-key">X</div>
+      <div class="skill-cd-overlay" id="skill-cd-1" style="display:none">0</div>
+    </div>
+  </div>
+
+  <!-- 미니맵 -->
+  <canvas id="minimap" width="160" height="120"></canvas>
+
+  <!-- 채팅 -->
+  <div id="chatbox">
+    <div id="chat-log"></div>
+    <div id="chat-input">
+      <input type="text" id="chat-text" placeholder="채팅 (Enter)" maxlength="80">
+      <button id="chat-send" onclick="sendChat()">전송</button>
+    </div>
+  </div>
+
+  <!-- 알림 -->
+  <div id="notify"></div>
+
+  <!-- 사망 -->
+  <div id="dead-screen" style="display:none; display:flex; display:none;">
+    <h2>💀 전사하셨습니다</h2>
+    <button id="respawn-btn" onclick="respawn()">부활하기</button>
+  </div>
+
+  <!-- 조작법 -->
+  <div id="controls-hint">
+    WASD / 방향키: 이동<br>
+    마우스 클릭: 기본 공격<br>
+    Z / X: 스킬 사용<br>
+    Enter: 채팅
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────
+// 클래스 데이터
+const CLASSES = {
+  '기사':    { icon:'🛡️', color:'#1565C0', desc:'높은 방어력과 체력' },
+  '요정':    { icon:'🧚', color:'#F06292', desc:'빠른 속도와 원거리' },
+  '마법사':  { icon:'🧙', color:'#7B1FA2', desc:'강력한 마법 공격' },
+  '군주':    { icon:'👑', color:'#F9A825', desc:'균형 잡힌 전투' },
+  '다크엘프':{ icon:'🌑', color:'#4A148C', desc:'빠른 어둠 마법사' },
+};
+const SKILL_ICONS = {
+  '방패치기':'🛡️', '돌격':'⚡', '빛의 화살':'✨', '치유의 빛':'💚',
+  '파이어볼':'🔥', '블리자드':'❄️', '왕의 분노':'👑', '영역 지배':'🌀',
+  '어둠의 화살':'🏹', '암흑 폭발':'💜',
+};
+
+// ──────────────────────────────────────────────────────────────
+// 로비 구성
+const classGrid = document.getElementById('class-grid');
+let selectedClass = '기사';
+Object.entries(CLASSES).forEach(([name, info]) => {
+  const card = document.createElement('div');
+  card.className = 'class-card' + (name === '기사' ? ' selected' : '');
+  card.innerHTML = `<div class="class-icon">${info.icon}</div>
+    <div class="class-name">${name}</div>
+    <div class="class-desc">${info.desc}</div>`;
+  card.onclick = () => {
+    document.querySelectorAll('.class-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    selectedClass = name;
+  };
+  classGrid.appendChild(card);
+});
+
+// ──────────────────────────────────────────────────────────────
+// 게임 변수
+let socket, myId;
+let camX = 0, camY = 0;
+let gameState = { players:{}, monsters:{}, projectiles:{} };
+let myPlayer = null;
+let keys = {};
+let mouseWorld = { x: 0, y: 0 };
+let mapWidth = 3200, mapHeight = 2400;
+let myExp = 0, myExpMax = 100, myGold = 0;
+let myAtk = 0, myDef = 0;
+let skillCooldowns = [0, 0];
+let skillDefs = [];
+let effects = []; // { x, y, dmg, color, life, maxLife }
+let isDead = false;
+let chatFocused = false;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const minimap = document.getElementById('minimap');
+const mctx = minimap.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ──────────────────────────────────────────────────────────────
+// 시작
+function startGame() {
+  const name = document.getElementById('player-name').value.trim() || '용사';
+  document.getElementById('lobby').style.display = 'none';
+  document.getElementById('game').style.display = 'block';
+
+  socket = io({ transports: ['websocket'] });
+
+  socket.on('connect', () => {
+    socket.emit('join_game', { name, class: selectedClass });
+  });
+
+  socket.on('joined', (data) => {
+    myId = data.sid;
+    mapWidth = data.map_width;
+    mapHeight = data.map_height;
+    skillDefs = data.skills || [];
+    // 스킬바 업데이트
+    skillDefs.forEach((s, i) => {
+      const icon = SKILL_ICONS[s.name] || '✨';
+      document.getElementById(`skill-icon-${i}`).textContent = icon;
+      document.getElementById(`skill-label-${i}`).textContent = s.name;
+      document.getElementById(`skill-${i}`).classList.add('ready');
+    });
+  });
+
+  socket.on('game_state', (state) => {
+    gameState = state;
+    if (myId && state.players[myId]) {
+      const p = state.players[myId];
+      myPlayer = p;
+      updateHUD(p);
+    }
+  });
+
+  socket.on('kill_reward', (data) => {
+    myExp = data.total_exp;
+    myExpMax = data.exp_max;
+    myGold = data.total_gold;
+    updateExpBar();
+    document.getElementById('gold-text').textContent = myGold;
+    showNotify(`+${data.exp} EXP  +${data.gold}G`, '#FFF176');
+  });
+
+  socket.on('level_up', (data) => {
+    showNotify(`🎉 레벨 업! Lv.${data.level}`, '#ffd700');
+  });
+
+  socket.on('player_hit', (data) => {
+    showNotify(`-${data.dmg} HP`, '#ef9a9a');
+    updateHPBar(data.hp, data.max_hp);
+  });
+
+  socket.on('healed', (data) => {
+    showNotify(`+${data.amount} HP 회복`, '#4CAF50');
+    updateHPBar(data.hp, data.max_hp);
+  });
+
+  socket.on('player_dead', () => {
+    isDead = true;
+    document.getElementById('dead-screen').style.display = 'flex';
+  });
+
+  socket.on('respawned', (data) => {
+    isDead = false;
+    document.getElementById('dead-screen').style.display = 'none';
+  });
+
+  socket.on('no_mp', () => {
+    showNotify('MP가 부족합니다!', '#90CAF9');
+  });
+
+  socket.on('skill_cooldown', (data) => {
+    showSkillCD(data.index, data.remaining);
+  });
+
+  socket.on('hit_effect', (data) => {
+    effects.push({
+      x: data.x, y: data.y,
+      dmg: data.dmg,
+      color: data.color || '#fff',
+      life: 0.9, maxLife: 0.9,
+    });
+  });
+
+  socket.on('chat', (data) => addChatMsg(data));
+
+  // 입력
+  window.addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === 'Enter' && !chatFocused) {
+      document.getElementById('chat-text').focus();
+    }
+    if (e.key === 'z' && !chatFocused) useSkill(0);
+    if (e.key === 'x' && !chatFocused) useSkill(1);
+  });
+  window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+  const chatInput = document.getElementById('chat-text');
+  chatInput.addEventListener('focus', () => { chatFocused = true; });
+  chatInput.addEventListener('blur', () => { chatFocused = false; });
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { sendChat(); chatInput.blur(); }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    mouseWorld.x = e.clientX + camX;
+    mouseWorld.y = e.clientY + camY;
+  });
+  canvas.addEventListener('click', (e) => {
+    if (isDead || chatFocused) return;
+    const tx = e.clientX + camX;
+    const ty = e.clientY + camY;
+    socket.emit('attack', { tx, ty });
+  });
+
+  // 게임 루프
+  requestAnimationFrame(gameLoop);
+  setInterval(sendMove, 50);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 이동 전송
+function sendMove() {
+  if (!socket || isDead || chatFocused) return;
+  let dx = 0, dy = 0;
+  if (keys['a'] || keys['arrowleft'])  dx -= 1;
+  if (keys['d'] || keys['arrowright']) dx += 1;
+  if (keys['w'] || keys['arrowup'])    dy -= 1;
+  if (keys['s'] || keys['arrowdown'])  dy += 1;
+  if (dx || dy) socket.emit('move', { dx, dy });
+}
+
+// ──────────────────────────────────────────────────────────────
+// 스킬
+function useSkill(idx) {
+  if (!socket || isDead) return;
+  const now = Date.now() / 1000;
+  const cd = skillCooldowns[idx] || 0;
+  if (now < cd) return;
+  socket.emit('skill', { index: idx, tx: mouseWorld.x, ty: mouseWorld.y });
+  const def = skillDefs[idx];
+  if (def) {
+    skillCooldowns[idx] = now + def.cooldown;
+    showSkillCDLocal(idx, def.cooldown);
+  }
+}
+
+function showSkillCDLocal(idx, duration) {
+  const overlay = document.getElementById(`skill-cd-${idx}`);
+  const slot = document.getElementById(`skill-${idx}`);
+  overlay.style.display = 'flex';
+  slot.classList.remove('ready');
+  let remaining = duration;
+  const interval = setInterval(() => {
+    remaining -= 0.1;
+    overlay.textContent = remaining > 0 ? remaining.toFixed(1) : '';
+    if (remaining <= 0) {
+      clearInterval(interval);
+      overlay.style.display = 'none';
+      slot.classList.add('ready');
+    }
+  }, 100);
+}
+
+function showSkillCD(idx, remaining) {
+  // 서버에서 온 쿨다운 알림
+}
+
+// ──────────────────────────────────────────────────────────────
+// 채팅
+function sendChat() {
+  const input = document.getElementById('chat-text');
+  const text = input.value.trim();
+  if (!text || !socket) return;
+  socket.emit('chat', { text });
+  input.value = '';
+}
+function addChatMsg(data) {
+  const log = document.getElementById('chat-log');
+  const div = document.createElement('div');
+  const color = data.type === 'system' ? '#888' :
+    (data.class ? CLASSES[data.class]?.color : '#ccc') || '#ccc';
+  div.style.color = color;
+  div.textContent = data.text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  if (log.children.length > 50) log.removeChild(log.firstChild);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 부활
+function respawn() {
+  if (socket) socket.emit('respawn');
+}
+
+// ──────────────────────────────────────────────────────────────
+// 알림
+function showNotify(text, color='#fff') {
+  const div = document.createElement('div');
+  div.className = 'notify-msg';
+  div.style.color = color;
+  div.style.textShadow = `0 0 12px ${color}`;
+  div.textContent = text;
+  document.getElementById('notify').appendChild(div);
+  setTimeout(() => div.remove(), 2000);
+}
+
+// ──────────────────────────────────────────────────────────────
+// HUD 업데이트
+function updateHUD(p) {
+  document.getElementById('hud-name').textContent = `${p.name} (${p.class}) Lv.${p.level}`;
+  document.getElementById('hud-name').style.color = CLASSES[p.class]?.color || '#fff';
+  updateHPBar(p.hp, p.max_hp);
+  const mpPct = p.max_mp ? (p.mp / p.max_mp * 100) : 0;
+  document.getElementById('mp-bar').style.width = mpPct + '%';
+  document.getElementById('mp-text').textContent = `${p.mp}/${p.max_mp}`;
+}
+function updateHPBar(hp, max) {
+  const pct = max ? (hp / max * 100) : 0;
+  document.getElementById('hp-bar').style.width = pct + '%';
+  document.getElementById('hp-text').textContent = `${hp}/${max}`;
+}
+function updateExpBar() {
+  const pct = myExpMax ? (myExp / myExpMax * 100) : 0;
+  document.getElementById('exp-bar').style.width = pct + '%';
+  document.getElementById('exp-text').textContent = `${myExp}/${myExpMax}`;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 렌더링
+let lastTime = 0;
+function gameLoop(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
+
+  // 이펙트 업데이트
+  effects = effects.filter(e => { e.life -= dt; return e.life > 0; });
+
+  // 카메라
+  if (myPlayer) {
+    const target_cx = myPlayer.x - canvas.width / 2;
+    const target_cy = myPlayer.y - canvas.height / 2;
+    camX += (target_cx - camX) * 0.12;
+    camY += (target_cy - camY) * 0.12;
+    camX = Math.max(0, Math.min(mapWidth - canvas.width, camX));
+    camY = Math.max(0, Math.min(mapHeight - canvas.height, camY));
+  }
+
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ── 맵 타일 패턴 ──
+let mapPattern = null;
+function getMapPattern() {
+  if (mapPattern) return mapPattern;
+  const tc = document.createElement('canvas');
+  tc.width = 64; tc.height = 64;
+  const tctx = tc.getContext('2d');
+  tctx.fillStyle = '#1a2a1a';
+  tctx.fillRect(0, 0, 64, 64);
+  tctx.strokeStyle = '#1e2e1e';
+  tctx.lineWidth = 1;
+  tctx.beginPath();
+  tctx.moveTo(0, 32); tctx.lineTo(64, 32);
+  tctx.moveTo(32, 0); tctx.lineTo(32, 64);
+  tctx.stroke();
+  // 약간의 잔디
+  tctx.fillStyle = '#1c2e1c';
+  for (let i = 0; i < 4; i++) {
+    const rx = Math.random() * 64, ry = Math.random() * 64;
+    tctx.fillRect(rx, ry, 3, 3);
+  }
+  mapPattern = ctx.createPattern(tc, 'repeat');
+  return mapPattern;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(-camX, -camY);
+
+  // ── 맵 배경 ──
+  ctx.save();
+  ctx.translate(camX % 64, camY % 64);
+  ctx.fillStyle = getMapPattern() || '#1a2a1a';
+  ctx.fillRect(-64, -64, canvas.width + 128, canvas.height + 128);
+  ctx.restore();
+
+  // ── 맵 경계 ──
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, mapWidth, mapHeight);
+
+  // ── 투사체 ──
+  for (const [pid, proj] of Object.entries(gameState.projectiles)) {
+    ctx.beginPath();
+    ctx.arc(proj.x, proj.y, proj.size || 6, 0, Math.PI * 2);
+    ctx.fillStyle = proj.color || '#fff';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = proj.color || '#fff';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // ── 몬스터 ──
+  for (const [mid, mob] of Object.entries(gameState.monsters)) {
+    const sx = mob.x, sy = mob.y, sz = mob.size || 20;
+
+    // 그림자
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + sz * 0.9, sz * 0.7, sz * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 몬스터 몸체
+    ctx.fillStyle = mob.color || '#888';
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = mob.color || '#888';
+    ctx.beginPath();
+    if (mob.type === 'dragon') {
+      // 드래곤은 다이아몬드 형태
+      ctx.moveTo(sx, sy - sz);
+      ctx.lineTo(sx + sz * 0.7, sy);
+      ctx.lineTo(sx, sy + sz);
+      ctx.lineTo(sx - sz * 0.7, sy);
+      ctx.closePath();
+    } else {
+      ctx.arc(sx, sy, sz, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 몬스터 얼굴
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.arc(sx - sz * 0.25, sy - sz * 0.1, sz * 0.18, 0, Math.PI * 2);
+    ctx.arc(sx + sz * 0.25, sy - sz * 0.1, sz * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // HP 바
+    const barW = sz * 2.2, barH = 5;
+    const bx = sx - barW / 2, by = sy - sz - 14;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+    ctx.fillStyle = '#f44336';
+    ctx.fillRect(bx, by, barW, barH);
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillRect(bx, by, barW * (mob.hp / mob.max_hp), barH);
+
+    // 이름
+    ctx.fillStyle = '#ccc';
+    ctx.font = `${mob.type === 'dragon' ? 11 : 10}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(mob.name, sx, sy - sz - 17);
+  }
+
+  // ── 플레이어 ──
+  for (const [sid, p] of Object.entries(gameState.players)) {
+    const isMe = sid === myId;
+    const sz = 18;
+    const clsInfo = CLASSES[p.class] || {};
+
+    // 그림자
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + sz, sz * 0.7, sz * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 몸체
+    ctx.fillStyle = p.color || clsInfo.color || '#fff';
+    ctx.shadowBlur = isMe ? 16 : 8;
+    ctx.shadowColor = p.color || '#fff';
+    ctx.beginPath();
+    // 클래스별 모양
+    if (p.class === '기사') {
+      // 사각형 + 방패
+      ctx.fillRect(p.x - sz * 0.7, p.y - sz, sz * 1.4, sz * 2);
+    } else if (p.class === '요정') {
+      // 작은 원 + 날개 느낌
+      ctx.arc(p.x, p.y, sz * 0.85, 0, Math.PI * 2);
+    } else if (p.class === '마법사') {
+      // 삼각형 로브
+      ctx.moveTo(p.x, p.y - sz * 1.1);
+      ctx.lineTo(p.x + sz, p.y + sz * 0.9);
+      ctx.lineTo(p.x - sz, p.y + sz * 0.9);
+      ctx.closePath();
+    } else if (p.class === '군주') {
+      // 오각형 왕관 형태
+      const pts = 5, r = sz;
+      for (let i = 0; i < pts; i++) {
+        const a = (i / pts) * Math.PI * 2 - Math.PI / 2;
+        i === 0 ? ctx.moveTo(p.x + r * Math.cos(a), p.y + r * Math.sin(a))
+                : ctx.lineTo(p.x + r * Math.cos(a), p.y + r * Math.sin(a));
+      }
+      ctx.closePath();
+    } else {
+      // 다크엘프: 마름모
+      ctx.moveTo(p.x, p.y - sz * 1.1);
+      ctx.lineTo(p.x + sz * 0.7, p.y);
+      ctx.lineTo(p.x, p.y + sz * 1.1);
+      ctx.lineTo(p.x - sz * 0.7, p.y);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 내 캐릭터 테두리
+    if (isMe) {
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // HP 바
+    if (p.max_hp > 0) {
+      const barW = 44, barH = 5;
+      const bx = p.x - barW / 2, by = p.y - sz - 18;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+      ctx.fillStyle = '#b71c1c';
+      ctx.fillRect(bx, by, barW, barH);
+      ctx.fillStyle = isMe ? '#4CAF50' : '#66BB6A';
+      ctx.fillRect(bx, by, barW * (p.hp / p.max_hp), barH);
+    }
+
+    // 이름/레벨
+    ctx.fillStyle = isMe ? '#ffd700' : '#ddd';
+    ctx.font = `bold ${isMe ? 12 : 11}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${p.name} [${p.level}]`, p.x, p.y - sz - 22);
+  }
+
+  // ── 데미지 이펙트 ──
+  for (const ef of effects) {
+    const alpha = ef.life / ef.maxLife;
+    const oy = (1 - alpha) * 30;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = ef.dmg < 0 ? '#4CAF50' : ef.color;
+    ctx.font = `bold ${ef.dmg < 0 ? 14 : 13}px sans-serif`;
+    ctx.textAlign = 'center';
+    const text = ef.dmg < 0 ? `+${Math.abs(ef.dmg)}` : `-${ef.dmg}`;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = ef.dmg < 0 ? '#4CAF50' : ef.color;
+    ctx.fillText(text, ef.x, ef.y - 20 - oy);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+
+  // ── 미니맵 ──
+  drawMinimap();
+}
+
+function drawMinimap() {
+  const mw = 160, mh = 120;
+  const scaleX = mw / mapWidth;
+  const scaleY = mh / mapHeight;
+
+  mctx.fillStyle = '#0a1a0a';
+  mctx.fillRect(0, 0, mw, mh);
+
+  // 몬스터
+  for (const mob of Object.values(gameState.monsters)) {
+    mctx.fillStyle = mob.type === 'dragon' ? '#F44336' : '#ff8800';
+    mctx.fillRect(mob.x * scaleX - 1, mob.y * scaleY - 1, 3, 3);
+  }
+
+  // 플레이어
+  for (const [sid, p] of Object.entries(gameState.players)) {
+    mctx.fillStyle = sid === myId ? '#ffd700' : (p.color || '#fff');
+    mctx.beginPath();
+    mctx.arc(p.x * scaleX, p.y * scaleY, sid === myId ? 3.5 : 2.5, 0, Math.PI * 2);
+    mctx.fill();
+  }
+
+  // 화면 범위
+  if (myId && gameState.players[myId]) {
+    const vx = camX * scaleX, vy = camY * scaleY;
+    const vw = canvas.width * scaleX, vh = canvas.height * scaleY;
+    mctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    mctx.lineWidth = 1;
+    mctx.strokeRect(vx, vy, vw, vh);
+  }
+}
+</script>
+</body>
+</html>

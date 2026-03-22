@@ -292,9 +292,10 @@ canvas { display: block; cursor: crosshair; }
   <!-- 조작법 -->
   <div id="controls-hint">
     WASD / 방향키: 이동<br>
-    마우스 클릭: 기본 공격<br>
+    마우스 클릭: 이동 | 몬스터 클릭: 공격<br>
     Z / X: 스킬 사용<br>
-    Enter: 채팅
+    Enter: 채팅<br>
+    F4: 마우스이동 ON/OFF
   </div>
 </div>
 
@@ -350,6 +351,8 @@ let skillDefs = [];
 let effects = []; // { x, y, dmg, color, life, maxLife }
 let isDead = false;
 let chatFocused = false;
+let moveTarget = null;
+let mouseMoveMode = true; // F4로 토글
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
@@ -459,6 +462,13 @@ function startGame() {
     }
     if (e.key === 'z' && !chatFocused) useSkill(0);
     if (e.key === 'x' && !chatFocused) useSkill(1);
+    if (e.key === 'F4') {
+      e.preventDefault();
+      mouseMoveMode = !mouseMoveMode;
+      moveTarget = null;
+      showNotify(mouseMoveMode ? '🖱️ 마우스 이동 ON' : '⌨️ 키보드 전용 모드', '#00e5ff');
+      updateControlsHint();
+    }
   });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
@@ -477,12 +487,22 @@ function startGame() {
     if (isDead || chatFocused) return;
     const tx = e.clientX + camX;
     const ty = e.clientY + camY;
-    socket.emit('attack', { tx, ty });
+    if (mouseMoveMode) {
+      let nearMob = false;
+      for (const mob of Object.values(gameState.monsters)) {
+        if (Math.sqrt((mob.x-tx)**2+(mob.y-ty)**2) < (mob.size||20)+28) { nearMob=true; break; }
+      }
+      if (nearMob) socket.emit('attack', { tx, ty });
+      else moveTarget = { x: tx, y: ty };
+    } else {
+      socket.emit('attack', { tx, ty });
+    }
   });
 
   // 게임 루프
   requestAnimationFrame(gameLoop);
-  setInterval(sendMove, 50);
+  setInterval(sendMove, 33);
+  updateControlsHint();
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -494,6 +514,14 @@ function sendMove() {
   if (keys['d'] || keys['arrowright']) dx += 1;
   if (keys['w'] || keys['arrowup'])    dy -= 1;
   if (keys['s'] || keys['arrowdown'])  dy += 1;
+  // 클릭 이동
+  if (moveTarget && !dx && !dy && myPlayer) {
+    const tdx = moveTarget.x - myPlayer.x;
+    const tdy = moveTarget.y - myPlayer.y;
+    const d = Math.sqrt(tdx*tdx + tdy*tdy);
+    if (d > 18) { dx = tdx / d; dy = tdy / d; }
+    else moveTarget = null;
+  }
   if (dx || dy) socket.emit('move', { dx, dy });
 }
 
@@ -591,6 +619,18 @@ function updateExpBar() {
   const pct = myExpMax ? (myExp / myExpMax * 100) : 0;
   document.getElementById('exp-bar').style.width = pct + '%';
   document.getElementById('exp-text').textContent = `${myExp}/${myExpMax}`;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 조작법 힌트 업데이트
+function updateControlsHint() {
+  document.getElementById('controls-hint').innerHTML =
+    `WASD / 방향키: 이동<br>` +
+    (mouseMoveMode
+      ? `마우스 클릭: 이동 &nbsp;|&nbsp; 몬스터 클릭: 공격<br>`
+      : `마우스 클릭: 기본 공격<br>`) +
+    `Z / X: 스킬 사용<br>Enter: 채팅<br>` +
+    `<span style="color:#00e5ff">F4</span>: 마우스이동 <span style="color:${mouseMoveMode?'#00e5ff':'#888'}">${mouseMoveMode?'ON':'OFF'}</span>`;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -821,6 +861,24 @@ function draw() {
     ctx.fillText(text, ef.x, ef.y - 20 - oy);
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
+  }
+
+  // ── 클릭 이동 목표 표시 ──
+  if (moveTarget && mouseMoveMode) {
+    const pulse = (Math.sin(Date.now() * 0.007) + 1) * 0.5;
+    ctx.save();
+    ctx.strokeStyle = `rgba(0,229,255,${0.45 + pulse * 0.55})`;
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10; ctx.shadowColor = '#00e5ff';
+    ctx.beginPath();
+    ctx.arc(moveTarget.x, moveTarget.y, 10 + pulse * 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(moveTarget.x - 16, moveTarget.y); ctx.lineTo(moveTarget.x + 16, moveTarget.y);
+    ctx.moveTo(moveTarget.x, moveTarget.y - 16); ctx.lineTo(moveTarget.x, moveTarget.y + 16);
+    ctx.strokeStyle = `rgba(0,229,255,${0.3 + pulse * 0.4})`;
+    ctx.stroke();
+    ctx.restore();
   }
 
   ctx.restore();

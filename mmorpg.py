@@ -11,7 +11,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 MAP_WIDTH = 3200
 MAP_HEIGHT = 2400
-TICK_RATE = 0.05
+TICK_RATE = 0.033
 
 # ─── 몬스터 종류 ────────────────────────────────────────────
 MONSTERS = {
@@ -464,7 +464,7 @@ def on_move(data):
     p = players[sid]
     if p['hp'] <= 0:
         return
-    spd = p['spd'] * TICK_RATE * 3.5
+    spd = p['spd'] * TICK_RATE * 5.0
     dx, dy = data.get('dx', 0), data.get('dy', 0)
     if dx or dy:
         length = math.sqrt(dx**2 + dy**2) or 1
